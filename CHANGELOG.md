@@ -3,6 +3,82 @@
 Each section lists the changes of one released version. The release workflow
 takes the section of a version as the notes of its GitHub release.
 
+## 0.3.1
+
+**`ts init` keeps every file an ES module after `npm install`.** Up to
+0.3.0, `ts init` wrote only `tsconfig.json`, and the answer yes to its
+question "Run npm install --save-dev @types/node now?" let npm write a
+`package.json` without `"type"`. TypeScript then read every file of the
+folder as CommonJS, and each `import` and `export` was an error (TS1295).
+Now `ts init` first writes a `package.json` with `"type": "module"` when
+the folder and the folders above have none and the types of Node.js are
+missing, as it already did with TypeScript 7; npm adds `@types/node` to
+that file. The same holds when you run the command later yourself.
+
+**The cleanup of earlier runs deletes only folders of runs.** At its start,
+`ts` deletes the folders that earlier runs left in
+`node_modules/.cache/ts/`. Up to 0.3.0, it deleted every folder there whose
+name started with a number and a dash, also through a symbolic link
+`node_modules/.cache/ts` to another folder, where such a folder, for
+example `2024-photos`, is no folder of a run. Now it deletes only real
+folders with the name of a run. In the temporary folder of the system,
+`ts` stops with a message when its folder `nimblescape-ts-<user ID>` is a
+symbolic link.
+
+**Ctrl+C stops a loop of the shell.** When Ctrl+C, `kill` or a closed
+terminal ends the program, `ts` now ends by the same signal, as `node`
+does. Up to 0.3.0, it ended with the exit code 130, and bash then went on
+with a loop such as `for f in *.ts; do ts "$f"; done` or with the next
+line of a script.
+
+**A dev container no longer deletes a run of its host.** A dev container
+and its host can share the folder of a project, each with its own process
+IDs. Up to 0.3.0, a `ts` in the container deleted the folder of a run of
+the host whose process ID did not exist in the container, while the
+program still ran. Now the name of the folder of a run holds its machine,
+and `ts` deletes a folder of another machine only when it is older than one
+day.
+
+**No slow editor with a wrong assignment folder.** The plugin lists at most
+100 folders below an assignment root. A wrong root with many folders and
+few TypeScript files, for example a home folder with a `package.json`, made
+the TypeScript server list all its folders after each change of a file.
+
+**The extension no longer starts the TypeScript extension.** Up to 0.3.0,
+it started the TypeScript extension of VS Code in every window, also
+without a TypeScript or JavaScript file, to give the plugin its settings.
+Now it waits until VS Code starts the TypeScript extension for such a
+file. At its start, the extension also no longer waits for `zsh`, which
+names the folders of its Tab completion, and it asks the zsh of the
+terminals, not another zsh on the `PATH`.
+
+**The upgrade of an old global TypeScript asks once.** With a `prefix` in
+`~/.npmrc`, npm installs a global package into another folder than the one
+next to Node.js. Up to 0.3.0, an old TypeScript next to Node.js stayed the
+one that `ts` used after the upgrade, and `ts` asked again, as often as you
+answered yes. Now `ts` takes a global TypeScript 6 or newer from any of the
+global folders, and after an upgrade it looks once more; when it still
+finds the old one, it names its folder and stops.
+
+**No wait for the network without a terminal.** When `ts` finds no
+TypeScript and has no terminal, for example in a script, it now prints the
+install command at once, with the TypeScript of VS Code when this `ts` was
+built. Up to 0.3.0, it first asked GitHub for the newest version, which
+could take 8 seconds on a slow network. In a terminal, the list of versions
+now asks npm at the same time as GitHub.
+
+**Smaller fixes.** `ts install` installs only a version number of
+TypeScript 6 or newer as the default from the network. The script `ts` of
+the extension also works when the folder of the extension holds a `$`, a
+quote or a backtick. A folder whose name starts with two dots, such as
+`..old`, now counts as inside the assignment root. `ts check` no longer
+misreads a `tsconfig.json` with `,}` or `,]` inside a string. The plugin
+checks that the TypeScript server has every method that it changes, before
+it changes a project, so a future TypeScript costs the settings of `ts` in
+the editor, not the updates of the project. The README now says that
+`ts check` of a project with `references` writes what `tsc --build`
+writes.
+
 ## 0.3.0
 
 **Commands instead of options (not compatible with 0.2).** `ts` now has
@@ -194,4 +270,4 @@ trusted workspace.
 ---
 
 © 2026 Hannes Stauss (scalarion@nimblescape.com) ·
-[MIT License](https://github.com/nimblescape/nimblescape-typescript/blob/main/LICENSE).
+[MIT License](https://github.com/nimblescape/typescript-vscode/blob/main/LICENSE).

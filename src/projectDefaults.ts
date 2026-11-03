@@ -35,6 +35,13 @@ type TypeScript = typeof ts;
 const MAX_FILES = 300;
 
 /**
+ * The most folders that the plugin lists for one assignment root. The TypeScript server asks for the files after each
+ * change of the project, so a wrong root without TypeScript files, for example a home folder with a package.json,
+ * would list every folder below it after each key press.
+ */
+const MAX_FOLDERS = 100;
+
+/**
  * The copy of the npm package in the extension, whose types/ and @types/node the editor uses, as ts does in VS Code:
  * cli/ next to dist/, the folder of the bundle of the plugin.
  */
@@ -48,11 +55,12 @@ export function inferredOptions(typescript: TypeScript, folder: string, types = 
   return { ...options, allowNonTsExtensions: true };
 }
 
-/** The TypeScript files of an assignment root, without packages and hidden folders. */
+/** The TypeScript files of an assignment root, without packages and hidden folders, nearest folders first. */
 export function assignmentFiles(root: string): string[] {
   const files: string[] = [];
   const pending = [root];
-  while (pending.length > 0 && files.length < MAX_FILES) {
+  let listed = 0;
+  while (pending.length > 0 && files.length < MAX_FILES && listed++ < MAX_FOLDERS) {
     const folder = pending.shift()!;
     let entries: fs.Dirent[];
     try {
@@ -88,6 +96,16 @@ interface InferredProject {
 }
 
 /**
+ * Stops with an error before the first change when the project lacks a method that the defaults use or replace, so a
+ * project gets all the changes or none. The methods belong to the TypeScript server, and a new TypeScript may change
+ * them; the plugin then logs the error and leaves the project as TypeScript gives it.
+ */
+function requireMethods<T extends object>(project: T, names: readonly (keyof T & string)[]): void {
+  const missing = names.filter((name) => typeof project[name] !== 'function');
+  if (missing.length > 0) throw new Error(`the project of the TypeScript server has no method ${missing.join(', ')}`);
+}
+
+/**
  * Gives an inferred project with a TypeScript file the defaults of ts, the virtual package.json and the files of the
  * assignment roots of its files. `settings` gives the settings of the assignment roots when the project needs them,
  * `repositoryRoot` the folder of a file that VS Code has open, and `log` writes a line to the log of the server.
@@ -101,6 +119,16 @@ export function applyDefaults(
   repositoryRoot: (file: string) => string | undefined,
   log: (message: string) => void = () => {},
 ): () => boolean {
+  requireMethods(project, [
+    'getCurrentDirectory',
+    'getCompilationSettings',
+    'setCompilerOptions',
+    'getRootFiles',
+    'getScriptFileNames',
+    'updateGraph',
+    'fileExists',
+    'readFile',
+  ]);
   const options = inferredOptions(typescript, project.getCurrentDirectory());
   // The options of VS Code, which a project with only JavaScript files keeps.
   let editorOptions = project.getCompilationSettings();
@@ -182,10 +210,11 @@ function answerRootPackageJson(project: Pick<ConfiguredProject, 'fileExists' | '
  * tsconfig.json applies with the next update of the project.
  */
 export function applyConfiguredDefaults(project: ConfiguredProject, types = CLI_FOLDER): void {
-  answerRootPackageJson(project);
+  requireMethods(project, ['getCompilationSettings', 'getScriptFileNames', 'fileExists', 'readFile']);
   const file = globalsFile({ NIMBLESCAPE_TS_TYPES: types });
   // A missing file would be an error of the project (TS6053).
   if (!fs.existsSync(file)) throw new Error(`${file} is missing`);
+  answerRootPackageJson(project);
   const getScriptFileNames = project.getScriptFileNames.bind(project);
   project.getScriptFileNames = () => {
     const names = getScriptFileNames();

@@ -4,22 +4,24 @@
 
 // The parts of the command ts that need no TypeScript and no Node.js child process: the command line, the help, the
 // Tab completion scripts, the changes to the tsconfig.json of tsc --init, the versions and the list of the install
-// question, the JSONC reader and the temporary tsconfig.json. test/cli/ runs the built command.
+// question and its requests to the network, the search of the global TypeScript, the JSONC reader, the temporary
+// tsconfig.json and the cleanup of the folders of runs. test/cli/ runs the built command.
 
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseArguments } from '../../src/cli/args.ts';
 import { keysLine, listKeys, listLines, moveInList, windowTop } from '../../src/cli/ask.ts';
 import { outputFile, projectOfFile, temporaryConfig, typeRoots, type Job } from '../../src/cli/compile.ts';
 import { completionScript } from '../../src/cli/completion.ts';
 import { adapt } from '../../src/cli/init.ts';
-import { compareVersions, offeredVersions, versionChoices } from '../../src/cli/install.ts';
+import { compareVersions, isOfferedVersion, offeredVersions, versionChoices } from '../../src/cli/install.ts';
 import { parseJsonc } from '../../src/cli/jsonc.ts';
 import { COMMANDS, helpText, OPTIONS, SHELLS } from '../../src/cli/options.ts';
 import { missingPackages } from '../../src/cli/packages.ts';
-import { findTypeScript } from '../../src/cli/typescript.ts';
+import { removeStaleRuns, runName } from '../../src/cli/run.ts';
+import { findGlobal, findTypeScript } from '../../src/cli/typescript.ts';
 import { DEFAULT_COMPILER_OPTIONS, findUp, hasBrowserTypes, isTsProject, rootPackageJson } from '../../src/defaults.ts';
 
 const folders: string[] = [];
@@ -152,6 +154,14 @@ describe('the install question', () => {
     expect(compareVersions('7.0.0-rc', '7.0.0')).toBeLessThan(0);
   });
 
+  it('installs only a version: no tag, range or address of a package from the network', () => {
+    expect(isOfferedVersion('6.0.3')).toBe(true);
+    expect(isOfferedVersion('7.1.0-rc.1')).toBe(true);
+    for (const value of ['latest', '^6.0.0', '6.0.3 || 7', 'https://example.com/typescript.tgz', 'github:someone/typescript', '5.9.3', '', 6, undefined]) {
+      expect(isOfferedVersion(value)).toBe(false);
+    }
+  });
+
   it('lists the versions newest first, with the default selected and named as recommended', () => {
     const fallback = { version: '6.0.3', reason: 'the TypeScript of VS Code 1.143.1' };
     expect(versionChoices(['6.0.2', '6.0.3', '7.0.2', '7.1.0-beta'], fallback)).toEqual({
@@ -198,6 +208,10 @@ describe('the install question', () => {
 describe('JSONC', () => {
   it('reads comments and trailing commas, and keeps strings with slashes', () => {
     expect(parseJsonc('{\n // a comment\n "a": "http://x", /* b */ "b": [1, 2,],\n}')).toEqual({ a: 'http://x', b: [1, 2] });
+  });
+
+  it('removes a comma before a closing bracket only outside a string, also after a comment', () => {
+    expect(parseJsonc('{ "a": "x, }", "b": ["y,]" /* c */, ], "c": "\\\\", }')).toEqual({ a: 'x, }', b: ['y,]'], c: '\\' });
   });
 });
 
@@ -277,6 +291,23 @@ describe('the packages and the TypeScript of a project', () => {
   });
 });
 
+describe('the global TypeScript', () => {
+  it('takes TypeScript 6 or newer from any global folder, and an older one only when no folder has a newer one', () => {
+    const typescript = (version: string) => JSON.stringify({ name: 'typescript', version });
+    // An old TypeScript next to Node.js, and the new one in the folder of a prefix in ~/.npmrc.
+    const nextToNode = tree({ 'typescript/package.json': typescript('5.9.3') });
+    const prefix = tree({ 'typescript/package.json': typescript('6.0.3') });
+    const empty = tree({});
+    expect(findGlobal([empty, nextToNode], () => prefix)).toMatchObject({ version: '6.0.3', source: 'global' });
+    expect(findGlobal([nextToNode], () => empty)).toMatchObject({ version: '5.9.3' });
+    expect(findGlobal([empty], () => undefined)).toBeUndefined();
+    // The global folder of npm takes some 100 ms: ts asks for it only when the other folders have no TypeScript 6.
+    const npmFolder = vi.fn(() => empty);
+    expect(findGlobal([prefix], npmFolder)).toMatchObject({ version: '6.0.3' });
+    expect(npmFolder).not.toHaveBeenCalled();
+  });
+});
+
 describe('the defaults', () => {
   it('find a file upwards and name the package.json at the root of the file system', () => {
     const root = tree({ 'a/x.json': '', 'a/b/c/.keep': '' });
@@ -300,5 +331,72 @@ describe('the defaults', () => {
     expect(hasBrowserTypes(['lib.esnext.d.ts', 'lib.dom.iterable.d.ts'])).toBe(true);
     expect(hasBrowserTypes(['esnext'])).toBe(false);
     expect(hasBrowserTypes(['lib.es2023.d.ts', 'lib.decorators.d.ts'])).toBe(false);
+  });
+});
+
+describe('the cleanup of the folders of runs', () => {
+  it('checks the process only on its own machine, and deletes a run of another machine after one day', () => {
+    const cache = tree({});
+    // The name of a run of this machine, with another process ID.
+    const ofThisMachine = (pid: number) => runName().replace(/^\d+/, String(pid));
+    const twoDaysAgo = (Date.now() - 2 * 24 * 60 * 60 * 1000) / 1000;
+    const runs = {
+      ended: ofThisMachine(999999),
+      running: ofThisMachine(process.ppid),
+      otherMachine: '999999-0123abcd-4567cdef',
+      otherMachineOld: '999999-0123abcd-89abcdef',
+      ts030: '999999-0123abcd',
+      ts030Old: '999998-0123abcd',
+    };
+    for (const name of Object.values(runs)) fs.mkdirSync(path.join(cache, name));
+    for (const name of [runs.otherMachineOld, runs.ts030Old]) fs.utimesSync(path.join(cache, name), twoDaysAgo, twoDaysAgo);
+    removeStaleRuns(cache);
+    expect(fs.readdirSync(cache).sort()).toEqual([runs.running, runs.otherMachine, runs.ts030].sort());
+  });
+});
+
+describe('the network for the install question', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.doUnmock('../../src/cli/ask.ts');
+    vi.resetModules();
+  });
+
+  it('is not asked without a terminal, when ts only prints the install command', async () => {
+    vi.resetModules();
+    vi.doMock('../../src/cli/ask.ts', async (original) => ({ ...(await original<object>()), canAsk: () => false }));
+    vi.stubGlobal('BUNDLED_TYPESCRIPT', '6.0.3');
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const errors: string[] = [];
+    vi.spyOn(console, 'error').mockImplementation((line: string) => void errors.push(line));
+    const { offerInstall } = await import('../../src/cli/install.ts');
+    expect(await offerInstall()).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(errors).toContain('Install it with: npm install --global typescript@6.0.3');
+  });
+
+  it('gets the versions of npm at the same time as the TypeScript of VS Code', async () => {
+    vi.resetModules();
+    vi.stubGlobal('BUNDLED_TYPESCRIPT', '6.0.3');
+    const urls: string[] = [];
+    let answer = () => {};
+    const network = new Promise<void>((resolve) => (answer = resolve));
+    // A slow network: no request gets an answer before both are sent.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        urls.push(url);
+        await network;
+        return { ok: false, status: 503 };
+      }),
+    );
+    const { listVersions } = await import('../../src/cli/install.ts');
+    const list = listVersions();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(urls.sort()).toEqual(['https://registry.npmjs.org/typescript', 'https://update.code.visualstudio.com/api/releases/stable']);
+    answer();
+    expect(await list).toMatchObject({ fallback: { version: '6.0.3' }, offered: [] });
   });
 });

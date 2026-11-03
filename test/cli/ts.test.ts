@@ -7,7 +7,8 @@
 // in a terminal. The TypeScript is the pinned TypeScript of the development tools, given as the TypeScript of VS Code
 // (NIMBLESCAPE_TS_TYPESCRIPT), so the tests do not depend on a global TypeScript of the computer.
 
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -108,6 +109,27 @@ describe('ts in a folder without tsconfig.json and package.json', () => {
     expect(runTs(folder, ['main.ts', 'exit']).code).toBe(3);
   });
 
+  it('ends by the signal that ended the program, so a loop of the shell stops after Ctrl+C', async () => {
+    const folder = tree({ 'main.ts': 'console.log("run");\nprocess.kill(0, "SIGINT");\nsetTimeout(() => {}, 5000);\n' });
+    const cache = path.join(os.tmpdir(), `nimblescape-ts-${os.userInfo().uid}`);
+    const before = fs.existsSync(cache) ? fs.readdirSync(cache) : [];
+    // A loop of bash in its own process group, as in a terminal; the program sends Ctrl+C to the whole group. bash
+    // goes on with the loop when the command ends with the exit code 130, and stops when the signal ended it.
+    const loop = `for i in 1 2; do "${process.execPath}" "${ts}" main.ts; echo "after $i"; done`;
+    const child = spawn('bash', ['-c', loop], {
+      cwd: folder,
+      detached: true,
+      env: { ...process.env, NIMBLESCAPE_TS_TYPESCRIPT: typescript },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let output = '';
+    child.stdout.on('data', (data: Buffer) => (output += data.toString()));
+    child.stderr.on('data', (data: Buffer) => (output += data.toString()));
+    const [code, signal] = (await once(child, 'close')) as [number | null, NodeJS.Signals | null];
+    expect({ output, code, signal }).toEqual({ output: 'run\n', code: null, signal: 'SIGINT' });
+    expect(fs.existsSync(cache) ? fs.readdirSync(cache) : []).toEqual(before);
+  });
+
   it('leaves no folder of the run behind', () => {
     const folder = tree({ 'main.ts': 'console.log(process.pid);\n' });
     const cache = path.join(os.tmpdir(), `nimblescape-ts-${os.userInfo().uid}`);
@@ -115,6 +137,30 @@ describe('ts in a folder without tsconfig.json and package.json', () => {
     expect(runTs(folder, ['main.ts']).code).toBe(0);
     expect(fs.existsSync(cache) ? fs.readdirSync(cache) : []).toEqual(before);
     expect(fs.readdirSync(folder)).toEqual(['main.ts']);
+  });
+
+  it('deletes only folders of earlier runs, also when node_modules/.cache/ts is a symbolic link to another folder', () => {
+    const folder = tree({ 'package.json': '{"name":"x"}\n', 'main.ts': 'console.log("ok");\n', 'other/2024-photos/a.txt': 'a', 'other/notes/b.txt': 'b' });
+    // A folder of a run of ts 0.3.0, two days old.
+    fs.mkdirSync(path.join(folder, 'other', '999999-0123abcd'));
+    const old = (Date.now() - 2 * 24 * 60 * 60 * 1000) / 1000;
+    fs.utimesSync(path.join(folder, 'other', '999999-0123abcd'), old, old);
+    fs.mkdirSync(path.join(folder, 'node_modules', '.cache'), { recursive: true });
+    fs.symlinkSync(path.join(folder, 'other'), path.join(folder, 'node_modules', '.cache', 'ts'));
+    expect(runTs(folder, ['check', 'main.ts']).code).toBe(0);
+    // The folder of a run whose process ended goes; every other folder stays.
+    expect(fs.readdirSync(path.join(folder, 'other')).sort()).toEqual(['2024-photos', 'notes']);
+  });
+
+  it('refuses a folder of the runs in the temporary folder that is a symbolic link', () => {
+    const temporary = tree({ 'mine/2024-photos/a.txt': 'a' });
+    const folder = tree({ 'main.ts': 'console.log("ok");\n' });
+    const cache = path.join(temporary, `nimblescape-ts-${os.userInfo().uid}`);
+    fs.symlinkSync(path.join(temporary, 'mine'), cache);
+    const result = runTs(folder, ['main.ts'], '', { TMPDIR: temporary });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe(`ts: The folder ${cache} is a symbolic link. Delete it, then run ts again.\n`);
+    expect(fs.readdirSync(path.join(temporary, 'mine'))).toEqual(['2024-photos']);
   });
 
   it('keeps the folder of the runs in the temporary folder for this user only', () => {
@@ -397,23 +443,31 @@ describe('ts init', () => {
     expect(text).not.toContain('noUncheckedIndexedAccess');
     // The entry marks the project of ts for ts and the editor.
     expect(text).toContain('"plugins": [{ "name": "nimblescape-typescript-plugin" }],');
-    // ts and the editor add the types of prompt(), alert() and confirm(), and every file is an ES module.
-    expect(fs.readdirSync(folder)).toEqual(['tsconfig.json']);
+    // ts and the editor add the types of prompt(), alert() and confirm(). The types of Node.js are missing, so npm will
+    // write a package.json: ts writes it first, with "type": "module", so every file stays an ES module.
+    expect(first.stdout).toContain('Created a new package.json with "type": "module", so every file is an ES module');
+    expect(fs.readdirSync(folder).sort()).toEqual(['package.json', 'tsconfig.json']);
+    expect(JSON.parse(fs.readFileSync(path.join(folder, 'package.json'), 'utf8'))).toEqual({ type: 'module' });
     const second = runTs(folder, ['init']);
     expect(second.code).toBe(1);
     expect(second.stderr).toContain('error TS5054');
   });
 
-  it('gives a project in which prompt(), console and the modules of Node.js work', () => {
+  it('gives a project in which imports, prompt(), console and the modules of Node.js work after npm install', () => {
     const folder = tree({
-      'main.ts': 'import { readFileSync } from "node:fs";\nconst name = prompt("Name?") ?? "";\nconsole.log(`Hello ${name}`, typeof readFileSync);\n',
+      'dog.ts': 'export const bark = (): string => "Woof";\n',
+      'main.ts': 'import { readFileSync } from "node:fs";\nimport { bark } from "./dog.ts";\nconst name = prompt("Name?") ?? "";\nconsole.log(`Hello ${name}`, typeof readFileSync, bark());\n',
     });
     expect(runTs(folder, ['init']).code).toBe(0);
-    // What npm install --save-dev @types/node gives the project.
+    // What npm install --save-dev @types/node gives the project: npm adds the package to the package.json of the folder,
+    // or writes a new one without "type", which would make every file CommonJS (error TS1295 at each import).
+    const manifest = path.join(folder, 'package.json');
+    const current = fs.existsSync(manifest) ? (JSON.parse(fs.readFileSync(manifest, 'utf8')) as Record<string, unknown>) : {};
+    fs.writeFileSync(manifest, `${JSON.stringify({ ...current, devDependencies: { '@types/node': '^26.0.0' } }, null, 2)}\n`);
     fs.mkdirSync(path.join(folder, 'node_modules', '@types'), { recursive: true });
     fs.symlinkSync(path.join(repository, 'node_modules', '@types', 'node'), path.join(folder, 'node_modules', '@types', 'node'));
     fs.symlinkSync(path.join(repository, 'node_modules', 'undici-types'), path.join(folder, 'node_modules', 'undici-types'));
-    expect(runTs(folder, ['main.ts'], 'Mia\n')).toMatchObject({ code: 0, stdout: 'Name? Mia\nHello Mia function\n' });
+    expect(runTs(folder, ['main.ts'], 'Mia\n')).toMatchObject({ code: 0, stdout: 'Name? Mia\nHello Mia function Woof\n' });
     expect(runTs(folder, ['check'])).toMatchObject({ code: 0, output: '' });
   });
 

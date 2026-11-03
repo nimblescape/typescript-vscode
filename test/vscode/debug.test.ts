@@ -104,6 +104,21 @@ async function nextPause(
 }
 
 /**
+ * Continues a pause after which the program runs to its end, and waits for the end of the session. When Node.js ends
+ * right after the resume, its answer to the resume of js-debug can be lost; js-debug then answers "continue" with
+ * "Unable to resume", although the program ran on (VS Code does not show this answer to the user). The output of the
+ * program and the end of the session show that it ran on.
+ */
+async function continueToEnd(pause: { session: vscode.DebugSession; threadId: number }, ended: Promise<void>): Promise<void> {
+  try {
+    await pause.session.customRequest('continue', { threadId: pause.threadId });
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== 'Unable to resume') throw error;
+  }
+  await ended;
+}
+
+/**
  * The frames of the stack that js-debug does not skip (skipFiles, or a place without a place in a .ts file), by the
  * path of their source. The labels between the parts of an asynchronous stack are no frames.
  */
@@ -172,8 +187,7 @@ describe('the debug type ts', () => {
       assert.equal(fs.realpathSync(pause.file), fs.realpathSync(file(folder, 'main.ts')));
       // An ES module runs its imports before its first statement; in CommonJS, the import is the first statement.
       assert.equal(pause.line, folder === 'commonjs' ? 2 : 3);
-      await pause.session.customRequest('continue', { threadId: pause.threadId });
-      await ended;
+      await continueToEnd(pause, ended);
       assert.match(output(), /Rex: Woof/);
     });
   }
@@ -196,8 +210,7 @@ describe('the debug type ts', () => {
       const own = await ownFrames(pause.session, pause.threadId);
       assert.deepEqual(own.map((source) => fs.realpathSync(source)), [fs.realpathSync(file(folder, 'sort.ts'))]);
       const count = messages.length;
-      await pause.session.customRequest('continue', { threadId: pause.threadId });
-      await ended;
+      await continueToEnd(pause, ended);
       assert.equal(messages.slice(count).some(({ message }) => message.event === 'stopped'), false, 'no second pause');
       assert.match(output(), /1 2 3/);
     });
@@ -217,8 +230,7 @@ describe('the debug type ts', () => {
       .join('');
     assert.match(text, /1 2 3/);
     assert.doesNotMatch(text, /error TS/);
-    await pause.session.customRequest('continue', { threadId: pause.threadId });
-    await first.ended;
+    await continueToEnd(pause, first.ended);
   });
 
   it('pauses at the first statement again after a restart of the session', async () => {
@@ -229,8 +241,7 @@ describe('the debug type ts', () => {
     await vscode.commands.executeCommand('workbench.action.debug.restart');
     const second = await nextPause(count);
     assert.deepEqual([second.reason, fs.realpathSync(second.file), second.line], ['step', fs.realpathSync(file('commonjs', 'sort.ts')), 5]);
-    await second.session.customRequest('continue', { threadId: second.threadId });
-    await ended;
+    await continueToEnd(second, ended);
     // js-debug ends the first run with SIGTERM (killBehavior "polite"), so ts deletes the folder of that run too.
     assert.equal(fs.existsSync(file('commonjs', 'node_modules')), false);
   });
@@ -250,8 +261,8 @@ describe('the debug type ts', () => {
       await first.session.customRequest('continue', { threadId: first.threadId });
       const second = await nextPause(count);
       assert.deepEqual([second.reason, fs.realpathSync(second.file), second.line], ['breakpoint', fs.realpathSync(dog.fsPath), 4]);
-      await second.session.customRequest('continue', { threadId: second.threadId });
-      await ended;
+      await continueToEnd(second, ended);
+      assert.match(output(), /Rex: Woof/);
       // ts deletes the folder of the run, and the folders that it created for it.
       if (folder === 'linked') assert.deepEqual(fs.readdirSync(file('store', 'packages')), ['.keep']);
       else assert.equal(fs.existsSync(file(folder, 'node_modules')), false);

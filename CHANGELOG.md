@@ -3,6 +3,17 @@
 Each section lists the changes of one released version. The release workflow
 takes the section of a version as the notes of its GitHub release.
 
+## 0.3.4
+
+**The packages of a course install on Windows.** When `package.json`
+listed packages that were not installed, `ts` asked whether to run
+`npm ci`, and then the program ended without a message on Windows. `ts`
+started `npm`, but on Windows npm is the batch file `npm.cmd`, which
+Node.js finds and starts only through cmd. Now `ts` starts npm through cmd
+on Windows, for `npm ci`, `npm install`, `ts install`, `ts init` and the
+search for the global TypeScript. When npm cannot start, `ts` says so
+instead of ending without a reason.
+
 ## 0.3.3
 
 **A clear message when Node.js is missing.** When `node` was not on the

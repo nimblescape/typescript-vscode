@@ -197,35 +197,52 @@ entry also makes the folder a project of `ts`, as `ts init` writes it:
   (the debug type `ts`); the editor plugin and `ts` in a terminal are tested
   on Linux and macOS.
 
-### Node.js on the PATH
-
-`ts` and F5 start `node` from the `PATH`. When `ts` does not find it, it
-prints "ts: Node.js was not found on the PATH" with a link to this section,
-and the program does not start.
-
-The installer from [nodejs.org](https://nodejs.org) puts `node` on the
-`PATH` of every program. A version manager such as fnm or nvm puts `node`
-only on the `PATH` of a shell that runs its setup, for example `fnm env` in
-the profile of PowerShell. VS Code started from the Start menu or a desktop
-icon does not run that setup, so on Windows its terminals and debug
-sessions have no `node`. Put the default Node.js of the version manager on
-the `PATH` of your user. For fnm on Windows, in PowerShell (use a version
-that `fnm list` shows):
-
-```powershell
-fnm default 24
-$fnm = (fnm env --json | ConvertFrom-Json).FNM_DIR
-[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";$fnm\aliases\default", "User")
-```
-
-Then close all windows of VS Code and start it again, because Windows gives
-a program its `PATH` when the program starts. `where node` in a new cmd
-window shows the Node.js that VS Code finds.
-
 The tests run with TypeScript 6.0.3, the TypeScript of VS Code 1.125 and
 later. TypeScript 7 has no `tsserver.js` and loads no plugins: for a
 project that installs TypeScript 7, VS Code uses its own TypeScript, which
 loads the plugin, and `ts` uses TypeScript 7.
+
+### Node.js on the PATH
+
+`ts` and F5 start `node` from the `PATH`. When `ts` does not find it, it
+prints "ts: Node.js was not found on the PATH" with a link to this section,
+and the program does not start. `node --version` in a new terminal of
+VS Code shows the Node.js that `ts` and F5 find.
+
+**Install Node.js** 22 or newer, then close all windows of VS Code and start
+it again. VS Code gets its `PATH` when it starts.
+
+- macOS: the installer from [nodejs.org](https://nodejs.org/en/download),
+  or `brew install node` with [Homebrew](https://brew.sh).
+- Linux: the package of your distribution, when it has version 22 or newer,
+  or the files from [nodejs.org](https://nodejs.org/en/download).
+- Windows: the installer from [nodejs.org](https://nodejs.org/en/download).
+
+**With a version manager** such as fnm or nvm, `node` is only on the `PATH`
+of a shell that ran the setup of the version manager.
+
+- macOS and Linux: when VS Code starts from the Dock or the menu of the
+  desktop, it runs your login shell once and takes its variables. So put the
+  setup into the file that your shell reads: for fnm, the line
+  `eval "$(fnm env --use-on-cd)"` in `~/.zshrc` (zsh, the shell of macOS)
+  or `~/.bashrc` (bash), and choose a default version with
+  `fnm default 24`. For bash, `~/.bash_profile` or `~/.profile` must read
+  `~/.bashrc`, as it does by default on most Linux distributions, because
+  a login shell reads only these files. The installer of nvm adds its setup
+  to these files; `nvm alias default 24` chooses the default version. Then
+  start VS Code again.
+- Windows: VS Code does not run the profile of PowerShell when it starts.
+  For fnm, put its default Node.js on the `PATH` of your user, in
+  PowerShell (use a version that `fnm list` shows):
+
+  ```powershell
+  fnm default 24
+  $fnm = (fnm env --json | ConvertFrom-Json).FNM_DIR
+  [Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";$fnm\aliases\default", "User")
+  ```
+
+  nvm for Windows puts a link to the selected version on the `PATH` when you
+  install it; `nvm use 24` selects the version. Then start VS Code again.
 
 ## Limits
 

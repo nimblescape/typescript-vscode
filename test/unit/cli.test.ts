@@ -16,7 +16,7 @@ import { keysLine, listKeys, listLines, moveInList, windowTop } from '../../src/
 import { outputFile, projectOfFile, temporaryConfig, typeRoots, type Job } from '../../src/cli/compile.ts';
 import { completionScript } from '../../src/cli/completion.ts';
 import { adapt } from '../../src/cli/init.ts';
-import { compareVersions, isOfferedVersion, offeredVersions, versionChoices } from '../../src/cli/install.ts';
+import { compareVersions, isOfferedVersion, npmLockTypeScript, offeredVersions, pnpmLockTypeScript, versionChoices } from '../../src/cli/install.ts';
 import { parseJsonc } from '../../src/cli/jsonc.ts';
 import { COMMANDS, helpText, OPTIONS, SHELLS } from '../../src/cli/options.ts';
 import { missingPackages } from '../../src/cli/packages.ts';
@@ -160,6 +160,49 @@ describe('the install question', () => {
     for (const value of ['latest', '^6.0.0', '6.0.3 || 7', 'https://example.com/typescript.tgz', 'github:someone/typescript', '5.9.3', '', 6, undefined]) {
       expect(isOfferedVersion(value)).toBe(false);
     }
+  });
+
+  it('reads the TypeScript of VS Code from the lock file of pnpm, only of the importer "." itself', () => {
+    // The form of extensions/pnpm-lock.yaml of VS Code: the folder extensions/ and the extensions as importers.
+    const lock = [
+      "lockfileVersion: '9.0'",
+      '',
+      'importers:',
+      '',
+      '  .:',
+      '    dependencies:',
+      '      typescript:',
+      '        specifier: ^6.0.3',
+      '        version: 6.0.3',
+      '    devDependencies:',
+      '      esbuild:',
+      '        specifier: 0.28.1',
+      '        version: 0.28.1',
+      '',
+      '  html-language-features/server:',
+      '    dependencies:',
+      '      typescript:',
+      '        specifier: ^5.4.0',
+      '        version: 5.4.5',
+      '',
+      'packages:',
+      '',
+      '  typescript@6.0.3:',
+      '    resolution: {integrity: sha512-x}',
+    ].join('\n');
+    expect(pnpmLockTypeScript(lock)).toBe('6.0.3');
+    expect(pnpmLockTypeScript(lock.replace('        version: 6.0.3', "        version: '7.0.2(@types/node@26.0.0)'"))).toBe('7.0.2');
+    // TypeScript only in another importer, under another dependency of ".", or no lock file of pnpm at all.
+    expect(pnpmLockTypeScript(lock.replace('      typescript:\n        specifier: ^6.0.3\n        version: 6.0.3\n', ''))).toBeUndefined();
+    expect(pnpmLockTypeScript(lock.replace('      typescript:\n        specifier: ^6.0.3', '      esbuild2:\n        specifier: ^6.0.3'))).toBeUndefined();
+    expect(pnpmLockTypeScript('404: Not Found')).toBeUndefined();
+    expect(pnpmLockTypeScript(lock.replaceAll('\n', '\r\n'))).toBe('6.0.3');
+  });
+
+  it('reads the TypeScript of VS Code from the lock file of npm', () => {
+    expect(npmLockTypeScript({ packages: { 'node_modules/typescript': { version: '6.0.3' } } })).toBe('6.0.3');
+    expect(npmLockTypeScript({ packages: {} })).toBeUndefined();
+    expect(npmLockTypeScript(null)).toBeUndefined();
   });
 
   it('lists the versions newest first, with the default selected and named as recommended', () => {
@@ -398,5 +441,38 @@ describe('the network for the install question', () => {
     expect(urls.sort()).toEqual(['https://registry.npmjs.org/typescript', 'https://update.code.visualstudio.com/api/releases/stable']);
     answer();
     expect(await list).toMatchObject({ fallback: { version: '6.0.3' }, offered: [] });
+  });
+
+  it('takes the TypeScript of VS Code from the lock file of pnpm, else from the lock file of npm', async () => {
+    const extensions = 'https://raw.githubusercontent.com/microsoft/vscode/1.146.0/extensions';
+    const pnpmLock = 'importers:\n\n  .:\n    dependencies:\n      typescript:\n        specifier: ^7.0.2\n        version: 7.0.2\n';
+    const npmLock = { packages: { 'node_modules/typescript': { version: '6.0.3' } } };
+    /** A network with the newest VS Code 1.146.0 and the files of `files`; every other address answers 404. */
+    const network = (files: Record<string, unknown>) => {
+      const urls: string[] = [];
+      const answers: Record<string, unknown> = { 'https://update.code.visualstudio.com/api/releases/stable': ['1.146.0', '1.145.2'], ...files };
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string) => {
+          urls.push(url);
+          const body = answers[url];
+          if (body === undefined) return { ok: false, status: 404 };
+          return { ok: true, status: 200, json: async () => body, text: async () => String(body) };
+        }),
+      );
+      return urls;
+    };
+    const { vscodeTypeScript } = await import('../../src/cli/install.ts');
+
+    const urls = network({ [`${extensions}/pnpm-lock.yaml`]: pnpmLock, [`${extensions}/package-lock.json`]: npmLock });
+    expect(await vscodeTypeScript()).toEqual({ typescript: '7.0.2', vscode: '1.146.0' });
+    expect(urls.slice(1).sort()).toEqual([`${extensions}/package-lock.json`, `${extensions}/pnpm-lock.yaml`]);
+    network({ [`${extensions}/package-lock.json`]: npmLock });
+    expect(await vscodeTypeScript()).toEqual({ typescript: '6.0.3', vscode: '1.146.0' });
+    // A lock file of pnpm without the TypeScript of "." does not hide the one of npm.
+    network({ [`${extensions}/pnpm-lock.yaml`]: 'importers:\n', [`${extensions}/package-lock.json`]: npmLock });
+    expect(await vscodeTypeScript()).toEqual({ typescript: '6.0.3', vscode: '1.146.0' });
+    network({});
+    expect(await vscodeTypeScript()).toBeUndefined();
   });
 });

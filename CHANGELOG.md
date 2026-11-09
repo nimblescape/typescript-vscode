@@ -3,6 +3,18 @@
 Each section lists the changes of one released version. The release workflow
 takes the section of a version as the notes of its GitHub release.
 
+## 0.3.2
+
+**`ts` finds the TypeScript of VS Code also after the change of VS Code to
+pnpm.** The default version of the install question is the TypeScript of
+the newest stable VS Code. Up to 0.3.1, `ts` read it only from the file
+`extensions/package-lock.json` of VS Code on GitHub. VS Code now builds
+its extensions with pnpm, and its newer versions have the file
+`extensions/pnpm-lock.yaml` instead. With such a version, `ts` would have
+offered the TypeScript that VS Code shipped when `ts` was built, and named
+it "offline". Now `ts` reads `pnpm-lock.yaml` and, for the older versions
+of VS Code, `package-lock.json`.
+
 ## 0.3.1
 
 **`ts init` keeps every file an ES module after `npm install`.** Up to

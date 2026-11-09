@@ -5,7 +5,8 @@
 // The global install of TypeScript, when ts finds none (typescript.ts), and `ts install`. The default
 // version is the TypeScript of the newest stable VS Code, so that ts outside VS Code reports the same errors as the
 // editor: ts reads the newest version of VS Code from update.code.visualstudio.com and the TypeScript of that version
-// from the file extensions/package-lock.json of VS Code on GitHub. Offline, the default is the TypeScript that VS Code
+// from the lock file of its extensions on GitHub: extensions/pnpm-lock.yaml, or extensions/package-lock.json in the
+// versions of VS Code before the change from npm to pnpm. Offline, the default is the TypeScript that VS Code
 // shipped when this release of ts was built (BUNDLED_TYPESCRIPT). In a terminal, ts lists every version of npm from
 // TypeScript 6 on, without the nightly builds, newest first, and the user selects one with the arrow keys; the default
 // is selected first. A global TypeScript that is too old for ts (below TypeScript 6) gets the same list, after the
@@ -22,10 +23,18 @@ declare const BUNDLED_TYPESCRIPT: string;
 /** The time that one request may take; ts falls back to BUNDLED_TYPESCRIPT after it. */
 const TIMEOUT = 4000;
 
-async function fetchJson(url: string, headers: Record<string, string> = {}): Promise<unknown> {
+async function fetchOk(url: string, headers: Record<string, string> = {}): Promise<Response> {
   const response = await fetch(url, { headers, signal: AbortSignal.timeout(TIMEOUT) });
   if (!response.ok) throw new Error(`${url}: ${response.status}`);
-  return response.json();
+  return response;
+}
+
+async function fetchJson(url: string, headers: Record<string, string> = {}): Promise<unknown> {
+  return (await fetchOk(url, headers)).json();
+}
+
+async function fetchText(url: string): Promise<string> {
+  return (await fetchOk(url)).text();
 }
 
 /**
@@ -37,18 +46,60 @@ export function isOfferedVersion(version: unknown): version is string {
   return typeof version === 'string' && /^\d+\.\d+\.\d+(-(beta|rc)(\.\d+)?)?$/.test(version) && parts(version)[0] >= MINIMUM_MAJOR;
 }
 
+/**
+ * The TypeScript in the lock file of pnpm (extensions/pnpm-lock.yaml): the version of `typescript` among the
+ * dependencies of the importer `.`, the folder extensions/ itself. pnpm writes these lines:
+ *
+ *   importers:
+ *
+ *     .:
+ *       dependencies:
+ *         typescript:
+ *           specifier: ^6.0.3
+ *           version: 6.0.3
+ *
+ * ts reads only the indentation of these lines, without a YAML parser; isOfferedVersion checks the result.
+ */
+export function pnpmLockTypeScript(lock: string): string | undefined {
+  let [section, importer, dependency] = ['', '', ''];
+  for (const line of lock.split(/\r?\n/)) {
+    const text = line.trim();
+    if (text === '' || text.startsWith('#')) continue;
+    const indent = line.length - line.trimStart().length;
+    if (indent === 0) [section, importer, dependency] = [text, '', ''];
+    else if (indent === 2) [importer, dependency] = [text, ''];
+    else if (indent === 4) dependency = '';
+    else if (indent === 6) dependency = text;
+    else if (indent === 8 && section === 'importers:' && importer === '.:' && dependency === 'typescript:') {
+      // A version can carry the versions of its peer dependencies in parentheses, and quotes.
+      const version = /^version:\s*['"]?([^'"\s(]+)/.exec(text)?.[1];
+      if (version !== undefined) return version;
+    }
+  }
+  return undefined;
+}
+
+/** The TypeScript in the lock file of npm (extensions/package-lock.json). */
+export function npmLockTypeScript(lock: unknown): unknown {
+  return (lock as { packages?: Record<string, { version?: unknown }> } | null)?.packages?.['node_modules/typescript']?.version;
+}
+
 /** The TypeScript of the newest stable VS Code, and that version of VS Code; undefined offline. */
 export async function vscodeTypeScript(): Promise<{ typescript: string; vscode: string } | undefined> {
   try {
     const releases = await fetchJson('https://update.code.visualstudio.com/api/releases/stable');
-    // The version of VS Code names a tag in the address of the next request.
+    // The version of VS Code names a tag in the address of the next requests.
     const vscode = Array.isArray(releases) && typeof releases[0] === 'string' && /^\d+\.\d+\.\d+$/.test(releases[0]) ? releases[0] : undefined;
     if (!vscode) return undefined;
-    const lock = (await fetchJson(`https://raw.githubusercontent.com/microsoft/vscode/${vscode}/extensions/package-lock.json`)) as {
-      packages?: Record<string, { version?: unknown }>;
-    };
-    const typescript = lock.packages?.['node_modules/typescript']?.version;
-    return isOfferedVersion(typescript) ? { typescript, vscode } : undefined;
+    // A version of VS Code has one of the two lock files: pnpm-lock.yaml since VS Code builds its extensions with
+    // pnpm, package-lock.json before. ts asks for both at the same time and prefers the one of pnpm.
+    const extensions = `https://raw.githubusercontent.com/microsoft/vscode/${vscode}/extensions`;
+    const found = await Promise.allSettled([
+      fetchText(`${extensions}/pnpm-lock.yaml`).then(pnpmLockTypeScript),
+      fetchJson(`${extensions}/package-lock.json`).then(npmLockTypeScript),
+    ]);
+    const typescript = found.map((result) => (result.status === 'fulfilled' ? result.value : undefined)).find(isOfferedVersion);
+    return typescript === undefined ? undefined : { typescript, vscode };
   } catch {
     return undefined;
   }
@@ -117,8 +168,9 @@ export function versionChoices(
 }
 
 /**
- * The default version and the offered versions for the list. The two requests of the default and the request to npm
- * run at the same time, so a slow network makes the list wait for one timeout of each, not for three.
+ * The default version and the offered versions for the list. The requests of the default (the version of VS Code, then
+ * its two lock files at the same time) and the request to npm run at the same time, so a slow network makes the list
+ * wait for two timeouts at most, not for four.
  */
 export async function listVersions(): Promise<{ fallback: { version: string; reason: string }; offered: string[] }> {
   const [fallback, all] = await Promise.all([defaultVersion(), npmVersions()]);

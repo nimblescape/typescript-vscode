@@ -122,7 +122,7 @@ The extension and the plugin make no network connection and collect no telemetry
 | Address | What `ts` reads |
 | --- | --- |
 | `https://update.code.visualstudio.com/api/releases/stable` | The version of the newest stable VS Code. |
-| `https://raw.githubusercontent.com/microsoft/vscode/<version>/extensions/package-lock.json` | The TypeScript of that VS Code, the default of the question. |
+| `https://raw.githubusercontent.com/microsoft/vscode/<version>/extensions/pnpm-lock.yaml` and `…/extensions/package-lock.json` | The TypeScript of that VS Code, the default of the question. A version of VS Code has one of the two files: `pnpm-lock.yaml` since VS Code builds its extensions with pnpm, `package-lock.json` before. |
 | `https://registry.npmjs.org/typescript` | The versions of TypeScript that the question lists (only in a terminal). |
 
 Offline, the default is the TypeScript of VS Code when this version of `ts` was built, and `ts` lists no versions. `ts` sends no data of your computer and no file. npm then downloads TypeScript or the packages of the project from the registry that its configuration names.

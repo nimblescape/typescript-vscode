@@ -12,8 +12,8 @@
 // question whether to upgrade it, and so does `ts install` outside a project or `ts install --global`; without a
 // terminal, `ts install` installs the default.
 
-import { spawnSync } from 'node:child_process';
 import { askChoice, askYesNo, canAsk } from './ask.ts';
+import { runNpm } from './npm.ts';
 import { MINIMUM_MAJOR, type TypeScriptInstall } from './typescript.ts';
 
 /** The TypeScript of the newest stable VS Code when this release was built; esbuild sets it from package.json. */
@@ -102,8 +102,7 @@ export const installCommand = (version: string): string => `npm install --global
 /** Runs the global install of a version with npm; true when it worked. */
 export function install(version: string): boolean {
   console.log(`> ${installCommand(version)}`);
-  const result = spawnSync('npm', ['install', '--global', `typescript@${version}`], { stdio: 'inherit' });
-  return result.status === 0;
+  return runNpm(['install', '--global', `typescript@${version}`]) === 0;
 }
 
 /** The entries of the list: the offered versions and the default, newest first; the default says why it is the default. */

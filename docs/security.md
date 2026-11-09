@@ -43,7 +43,7 @@ A trusted workspace can name its own TypeScript with `typescript.tsdk`. VS Code 
 
 ## The terminals
 
-At its start, the extension writes three files into its storage folder of VS Code (`globalStorageUri`): `bin/ts`, a shell script that runs `node <folder of the extension>/cli/dist/ts.js` with its arguments, and the Tab completion scripts `completion/bash-completion/completions/ts` and `completion/zsh/_ts`. The texts of these files come from the extension only. It writes a file only when its text changed.
+At its start, the extension writes three files into its storage folder of VS Code (`globalStorageUri`): `bin/ts`, a shell script that runs `node <folder of the extension>/cli/dist/ts.js` with its arguments (on Windows also `bin/ts.cmd`, a batch file that does the same), and the Tab completion scripts `completion/bash-completion/completions/ts` and `completion/zsh/_ts`. The texts of these files come from the extension only. It writes a file only when its text changed.
 
 It then sets the environment of the terminals of VS Code with `environmentVariableCollection`:
 
@@ -80,11 +80,11 @@ Where its protection ends:
 
 ## The debug type
 
-The debug type `ts` turns a launch configuration into one of the JavaScript debugger of VS Code (js-debug) with `runtimeExecutable` set to `ts`: the global `ts` of npm, when the file `ts` on the `PATH` of the extension host is a link to `@nimblescape/typescript/dist/ts.js`, else `bin/ts` of the storage folder. js-debug starts `ts` and attaches to `ts` and to the program, which run with your rights, as from a terminal. The configuration adds `NIMBLESCAPE_TS_DEBUG` to their environment; `ts` removes it from the environment of the program.
+The debug type `ts` turns a launch configuration into one of the JavaScript debugger of VS Code (js-debug) with `runtimeExecutable` set to `ts`: the global `ts` of npm, when the file `ts` on the `PATH` of the extension host is a link to `@nimblescape/typescript/dist/ts.js`, else `bin/ts` of the storage folder. On Windows, it is the `ts.cmd` of npm on the `PATH`, when `node_modules/@nimblescape/typescript/dist/ts.js` lies next to it, else `bin/ts.cmd` of the storage folder. js-debug starts `ts` and attaches to `ts` and to the program, which run with your rights, as from a terminal. The configuration adds `NIMBLESCAPE_TS_DEBUG` to their environment; `ts` removes it from the environment of the program.
 
 With `stopOnEntry`, `NIMBLESCAPE_TS_DEBUG` is `stop-on-entry`, and `ts` loads `stop-on-entry.mjs` before the program. It changes only the main module, in memory, as Node.js loads it: an ES module gets the import of `pause.mjs` at its end, and the code of a CommonJS module runs in an inner function. Both call `callAndPauseOnStart` of the inspector binding of Node.js (`process.binding('inspector')`), the call that `node --inspect-brk` makes; it pauses only for a debugger that is attached. The compiled files on disk stay as `tsc` wrote them.
 
-Stop and Restart end the program with SIGTERM (`killBehavior` `polite`), so `ts` deletes the folder of the run. A program that ignores SIGTERM keeps running; VS Code's red Stop button then has no effect on it, and `kill -9` in a terminal ends it, as for any process.
+Stop and Restart end the program with SIGTERM (`killBehavior` `polite`), so `ts` deletes the folder of the run. A program that ignores SIGTERM keeps running; VS Code's red Stop button then has no effect on it, and `kill -9` in a terminal ends it, as for any process. On Windows, which has no SIGTERM, Stop and Restart end `ts` and the program at once (`killBehavior` `forceful`, `taskkill /F /T`), and the next run of `ts` deletes the folder of the run.
 
 The attributes of the configuration in `launch.json` win over the values of the debug type, as for any debug type of VS Code.
 

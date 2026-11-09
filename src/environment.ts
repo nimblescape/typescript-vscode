@@ -8,7 +8,9 @@
 //
 // - PATH ends with a folder of the extension that holds `ts`, a small shell script that starts cli/dist/ts.js with the
 //   Node.js of the PATH. It stands at the end, so a global ts (npm install --global @nimblescape/typescript, as the
-//   image of the Devspace installs it) comes first and decides the version.
+//   image of the Devspace installs it) comes first and decides the version. On Windows, the folder also holds
+//   `ts.cmd`, a batch file that does the same for cmd and PowerShell, which cannot run a shell script; the shell
+//   script stays for Git Bash. npm installs a global ts on Windows in the same way.
 // - NIMBLESCAPE_TS_TYPESCRIPT names the folder of the TypeScript that VS Code uses: its own, or the folder of the user
 //   setting js/ts.tsdk.path (typescript.tsdk before VS Code 1.143). ts takes it when the project pins no TypeScript.
 // - NIMBLESCAPE_TS_TYPES names cli/, whose types/ and @types/node the editor plugin uses too, so the editor and ts
@@ -48,11 +50,19 @@ export interface TsCommand {
 /**
  * The command ts that `npm install --global @nimblescape/typescript` put on the PATH of VS Code, if any: a file ts in
  * a folder of the PATH whose real path is the script of the package. Another command named ts, such as the one of
- * moreutils, does not count.
+ * moreutils, does not count. On Windows, npm writes no link but the batch file ts.cmd into the folder, and the package
+ * into node_modules/ of the same folder.
  */
-export function globalTs(environment: NodeJS.ProcessEnv = process.env): TsCommand | undefined {
-  for (const folder of (environment.PATH ?? '').split(path.delimiter)) {
+export function globalTs(environment: NodeJS.ProcessEnv = process.env, platform = process.platform): TsCommand | undefined {
+  // process.env of Windows finds the variable Path also as PATH.
+  for (const folder of (environment.PATH ?? '').split(platform === 'win32' ? ';' : ':')) {
     if (folder === '') continue;
+    if (platform === 'win32') {
+      const command = path.join(folder, 'ts.cmd');
+      const packageFolder = path.join(folder, 'node_modules', path.dirname(path.dirname(PACKAGE_SCRIPT)));
+      if (fs.existsSync(command) && fs.existsSync(path.join(folder, 'node_modules', PACKAGE_SCRIPT))) return { command, packageFolder };
+      continue;
+    }
     const command = path.join(folder, 'ts');
     try {
       const real = fs.realpathSync(command);
@@ -73,12 +83,26 @@ export function tsShellScript(script: string): string {
   return `#!/bin/sh\n# ts of the extension nimblescape TypeScript\nexec node ${quoted} "$@"\n`;
 }
 
-/** Writes the shell script that starts the ts of the extension, and returns its path. */
-export function writeTsScript(context: vscode.ExtensionContext): string {
-  const file = path.join(context.globalStorageUri.fsPath, 'bin', 'ts');
-  // The script names the script of this version of the extension; an update of the extension writes it again.
-  writeIfChanged(file, tsShellScript(tsScript(context)), 0o755);
-  return file;
+/**
+ * The text of the batch file that starts `script` with the Node.js of the PATH, for cmd and PowerShell on Windows. The
+ * path stands in double quotes, in which cmd reads no character as syntax but %, which %% keeps; a path of Windows
+ * cannot hold ". The exit code of Node.js is the exit code of the batch file.
+ */
+export function tsBatchScript(script: string): string {
+  return `@echo off\r\nrem ts of the extension nimblescape TypeScript\r\nnode "${script.replaceAll('%', '%%')}" %*\r\n`;
+}
+
+/**
+ * Writes the scripts that start the ts of the extension, and returns the path of the command for this computer: the
+ * shell script, or on Windows the batch file next to it.
+ */
+export function writeTsScript(context: vscode.ExtensionContext, platform = process.platform): string {
+  const folder = path.join(context.globalStorageUri.fsPath, 'bin');
+  // The scripts name the script of this version of the extension; an update of the extension writes them again.
+  writeIfChanged(path.join(folder, 'ts'), tsShellScript(tsScript(context)), 0o755);
+  if (platform !== 'win32') return path.join(folder, 'ts');
+  writeIfChanged(path.join(folder, 'ts.cmd'), tsBatchScript(tsScript(context)));
+  return path.join(folder, 'ts.cmd');
 }
 
 /** The ts that a debug session runs: a global ts wins over the ts of the extension, as on the PATH of the terminals. */

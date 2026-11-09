@@ -192,10 +192,35 @@ entry also makes the folder a project of `ts`, as `ts init` writes it:
 - VS Code 1.125 or later, with its TypeScript extension "TypeScript and
   JavaScript Language Features", which VS Code enables by default.
 - Node.js 22 or newer on the `PATH`, for `ts` and F5, and npm for the
-  install of packages.
+  install of packages (see [Node.js on the PATH](#nodejs-on-the-path)).
 - Linux, macOS or Windows (also with WSL). On Windows, the tests cover F5
   (the debug type `ts`); the editor plugin and `ts` in a terminal are tested
   on Linux and macOS.
+
+### Node.js on the PATH
+
+`ts` and F5 start `node` from the `PATH`. When `ts` does not find it, it
+prints "ts: Node.js was not found on the PATH" with a link to this section,
+and the program does not start.
+
+The installer from [nodejs.org](https://nodejs.org) puts `node` on the
+`PATH` of every program. A version manager such as fnm or nvm puts `node`
+only on the `PATH` of a shell that runs its setup, for example `fnm env` in
+the profile of PowerShell. VS Code started from the Start menu or a desktop
+icon does not run that setup, so on Windows its terminals and debug
+sessions have no `node`. Put the default Node.js of the version manager on
+the `PATH` of your user. For fnm on Windows, in PowerShell (use a version
+that `fnm list` shows):
+
+```powershell
+fnm default 24
+$fnm = (fnm env --json | ConvertFrom-Json).FNM_DIR
+[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";$fnm\aliases\default", "User")
+```
+
+Then close all windows of VS Code and start it again, because Windows gives
+a program its `PATH` when the program starts. `where node` in a new cmd
+window shows the Node.js that VS Code finds.
 
 The tests run with TypeScript 6.0.3, the TypeScript of VS Code 1.125 and
 later. TypeScript 7 has no `tsserver.js` and loads no plugins: for a

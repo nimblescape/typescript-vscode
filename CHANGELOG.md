@@ -3,6 +3,16 @@
 Each section lists the changes of one released version. The release workflow
 takes the section of a version as the notes of its GitHub release.
 
+## 0.3.3
+
+**A clear message when Node.js is missing.** When `node` was not on the
+`PATH`, `ts` and F5 stopped without a clear reason: cmd printed only
+"'node' is not recognized", and the program did not start. This happens,
+for example, when the version manager fnm puts Node.js only on the `PATH`
+of a shell that runs `fnm env`, and VS Code was started from the Start
+menu. Now `ts` prints "ts: Node.js was not found on the PATH" with a link
+to the README, which explains how to put Node.js on the `PATH` of VS Code.
+
 ## 0.3.2
 
 **F5 works directly on Windows.** Up to 0.3.1, the debug type `ts` started

@@ -74,22 +74,50 @@ export function globalTs(environment: NodeJS.ProcessEnv = process.env, platform 
   return undefined;
 }
 
+/** Where the README explains how Node.js gets on the PATH, for example from a version manager such as fnm. */
+export const NODE_HELP = 'https://github.com/nimblescape/typescript-vscode#nodejs-on-the-path';
+
+/**
+ * The message of the scripts when the PATH has no node, for example when a version manager such as fnm put node only on
+ * the PATH of a shell that ran its setup. It holds no character that cmd or sh reads as syntax.
+ */
+export const NO_NODE_MESSAGE = `ts: Node.js was not found on the PATH. See ${NODE_HELP}`;
+
 /**
  * The text of the shell script that starts `script` with the Node.js of the PATH. The path stands in single quotes, so
- * the shell reads no character of it as syntax, also not $, ` or " of a folder name.
+ * the shell reads no character of it as syntax, also not $, ` or " of a folder name. Without node on the PATH, it
+ * prints where the README helps, and exits with 127, the code of a shell for a command that it does not find.
  */
 export function tsShellScript(script: string): string {
   const quoted = `'${script.replaceAll("'", `'\\''`)}'`;
-  return `#!/bin/sh\n# ts of the extension nimblescape TypeScript\nexec node ${quoted} "$@"\n`;
+  return [
+    '#!/bin/sh',
+    '# ts of the extension nimblescape TypeScript',
+    `command -v node >/dev/null 2>&1 || { echo '${NO_NODE_MESSAGE}' >&2; exit 127; }`,
+    `exec node ${quoted} "$@"`,
+    '',
+  ].join('\n');
 }
 
 /**
  * The text of the batch file that starts `script` with the Node.js of the PATH, for cmd and PowerShell on Windows. The
  * path stands in double quotes, in which cmd reads no character as syntax but %, which %% keeps; a path of Windows
- * cannot hold ". The exit code of Node.js is the exit code of the batch file.
+ * cannot hold ". The exit code of Node.js is the exit code of the batch file. Without node on the PATH, it prints
+ * where the README helps, and exits with 9009, the code of cmd for a command that it does not find.
  */
 export function tsBatchScript(script: string): string {
-  return `@echo off\r\nrem ts of the extension nimblescape TypeScript\r\nnode "${script.replaceAll('%', '%%')}" %*\r\n`;
+  return [
+    '@echo off',
+    'rem ts of the extension nimblescape TypeScript',
+    'where node >nul 2>nul',
+    'if errorlevel 1 goto nonode',
+    `node "${script.replaceAll('%', '%%')}" %*`,
+    'exit /b',
+    ':nonode',
+    `echo ${NO_NODE_MESSAGE} 1>&2`,
+    'exit /b 9009',
+    '',
+  ].join('\r\n');
 }
 
 /**

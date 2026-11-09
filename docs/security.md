@@ -43,7 +43,7 @@ A trusted workspace can name its own TypeScript with `typescript.tsdk`. VS Code 
 
 ## The terminals
 
-At its start, the extension writes three files into its storage folder of VS Code (`globalStorageUri`): `bin/ts`, a shell script that runs `node <folder of the extension>/cli/dist/ts.js` with its arguments (on Windows also `bin/ts.cmd`, a batch file that does the same), and the Tab completion scripts `completion/bash-completion/completions/ts` and `completion/zsh/_ts`. The texts of these files come from the extension only. It writes a file only when its text changed.
+At its start, the extension writes three files into its storage folder of VS Code (`globalStorageUri`): `bin/ts`, a shell script that runs `node <folder of the extension>/cli/dist/ts.js` with its arguments, or prints a message with a link to the README when the `PATH` has no `node` (on Windows also `bin/ts.cmd`, a batch file that does the same), and the Tab completion scripts `completion/bash-completion/completions/ts` and `completion/zsh/_ts`. The texts of these files come from the extension only. It writes a file only when its text changed.
 
 It then sets the environment of the terminals of VS Code with `environmentVariableCollection`:
 

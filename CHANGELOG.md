@@ -3,6 +3,24 @@
 Each section lists the changes of one released version. The release workflow
 takes the section of a version as the notes of its GitHub release.
 
+## 0.3.2
+
+**F5 works directly on Windows.** Up to 0.3.1, the debug type `ts` started
+`ts` with a shell script, which cmd and PowerShell cannot run. On Windows,
+no program started, and the debug session waited without a pause, also with
+`stopOnEntry`; the extension nimblescape Mindbug, which starts programs with
+the debug type `ts`, did not pause either. Now the extension also writes the
+batch file `ts.cmd` next to the shell script and starts it on Windows, and
+it finds a global `ts` of npm by its `ts.cmd`. The terminals of VS Code on
+Windows get `ts` too: cmd and PowerShell run `ts.cmd`, and Git Bash runs the
+shell script. A new CI job runs the tests of the debug type on Windows.
+
+**Stop and Restart on Windows.** On Windows, Stop and Restart of a debug
+session now end `ts` and the program at once. Windows has no signal
+`SIGTERM`, and the polite request of the debugger ended neither `ts` nor
+the program, so they went on. The next start of `ts` deletes the folder of
+the run that ended so.
+
 ## 0.3.1
 
 **`ts init` keeps every file an ES module after `npm install`.** Up to

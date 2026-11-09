@@ -13,12 +13,14 @@
 # and packs the npm package @nimblescape/typescript of cli/ with npm pack. Both
 # stay workflow artifacts for inspection. The job "command" runs the tests of
 # the built command ts on Linux and macOS, with the oldest Node.js that ts
-# supports (engines of cli/package.json) and the newest LTS release. This
-# workflow publishes nothing: the release workflow calls it for the commit of a
-# version and publishes the VSIX and the npm package of that call. The workflow
-# "VS Code versions" calls it once per week with another VS Code version; such a
-# call runs only the type check, ESLint, the unit tests, the tests in VS Code
-# and the packages.
+# supports (engines of cli/package.json) and the newest LTS release. The job
+# "windows" runs the unit tests and the tests in a real VS Code of the debug
+# type ts on Windows, where the debug type starts ts with the batch file
+# ts.cmd. This workflow publishes nothing: the release workflow calls it for
+# the commit of a version and publishes the VSIX and the npm package of that
+# call. The workflow "VS Code versions" calls it once per week with another
+# VS Code version; such a call runs only the type check, ESLint, the unit
+# tests, the tests in VS Code and the packages.
 
 name: CI
 
@@ -152,3 +154,35 @@ jobs:
       # The tests run the built cli/dist/ts.js with this Node.js and the TypeScript of the development tools.
       - name: Run the tests of the command ts
         run: npm run test:cli
+
+  windows:
+    name: Debug type ts on Windows
+    # The workflow "VS Code versions" tests only the parts that depend on VS Code.
+    if: ${{ !inputs.vscode-version }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up the pinned Node release
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      - name: Install the locked development tools without install scripts
+        run: npm ci --ignore-scripts
+
+      - name: Install the locked package of the command ts without install scripts
+        run: npm ci --ignore-scripts --prefix cli
+
+      # The other unit tests name POSIX paths, a shell or npm without .cmd, and do not run on Windows yet.
+      - name: Run the unit tests of the debug type ts
+        run: npm test -- test/unit/debugType.test.ts
+
+      # Only the run "loose" of .vscode-test.mjs debugs programs; the other runs test the editor with the examples.
+      - name: Run the tests of the debug type ts in VS Code
+        run: npm run test:vscode -- --label loose

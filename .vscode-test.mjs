@@ -13,12 +13,18 @@
 // packages of the examples must be installed (npm ci --ignore-scripts --prefix examples). VSCODE_TEST_VERSION selects
 // the VS Code version: "stable" (the default), "insiders" or a version such as 1.125.0. On Linux without a display, run
 // it under xvfb-run.
+import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { defineConfig } from '@vscode/test-cli';
 
-/** The workspace of the run "loose" (scripts/build-vscode-tests.mjs), outside this repository and its package.json. */
-export const LOOSE_WORKSPACE = path.join(os.tmpdir(), 'nimblescape-typescript-test', 'loose');
+/**
+ * The workspace of the run "loose" (scripts/build-vscode-tests.mjs), outside this repository and its package.json. On
+ * Windows, the temporary folder of the system often has a short name of 8.3, such as C:\Users\RUNNER~1 on the runners
+ * of GitHub; the workspace has the long names, as a folder of a student has.
+ */
+const temporary = process.platform === 'win32' ? fs.realpathSync.native(os.tmpdir()) : os.tmpdir();
+export const LOOSE_WORKSPACE = path.join(temporary, 'nimblescape-typescript-test', 'loose');
 
 const version = process.env.VSCODE_TEST_VERSION || 'stable';
 const launchArgs = (label) => [

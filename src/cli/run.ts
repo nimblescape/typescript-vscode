@@ -79,12 +79,21 @@ export function cacheFolder(project: Project): string {
   return path.join(os.tmpdir(), `nimblescape-ts-${user}`);
 }
 
+/**
+ * The real path of an existing file. On Windows, it also has the long name of each folder that a short name of 8.3
+ * names, such as C:\Users\RUNNER~1 for C:\Users\runneradmin, which the temporary folder of the system often names:
+ * Node.js writes the ~ of a short name in the URL of an ES module as %7E, which no breakpoint of js-debug matches.
+ */
+export function realPath(file: string): string {
+  return process.platform === 'win32' ? fs.realpathSync.native(file) : fs.realpathSync(file);
+}
+
 /** A path with the real path of its nearest existing folder, as Node.js names a file that does not exist yet. */
 function realPathOfNew(file: string): string {
   const rest: string[] = [];
   for (let current = path.resolve(file); ; current = path.dirname(current)) {
     try {
-      return path.join(fs.realpathSync(current), ...rest.reverse());
+      return path.join(realPath(current), ...rest.reverse());
     } catch {
       if (path.dirname(current) === current) return path.resolve(file);
       rest.push(path.basename(current));
@@ -164,7 +173,7 @@ export function createRunFolder(project: Project): { folder: string; created: st
   const made = fs.mkdirSync(cacheFolder(project), { recursive: true, mode: shared ? 0o700 : 0o777 });
   const cache = realCacheFolder(project);
   if (shared) ownFolder(cache, cacheFolder(project));
-  const created = made === undefined ? undefined : fs.realpathSync(made);
+  const created = made === undefined ? undefined : realPath(made);
   removeStaleRuns(cache);
   const folder = path.join(cache, runName());
   fs.mkdirSync(folder);

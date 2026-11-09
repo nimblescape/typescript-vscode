@@ -193,7 +193,9 @@ entry also makes the folder a project of `ts`, as `ts init` writes it:
   JavaScript Language Features", which VS Code enables by default.
 - Node.js 22 or newer on the `PATH`, for `ts` and F5, and npm for the
   install of packages.
-- Linux or macOS. On Windows, use VS Code with WSL.
+- Linux, macOS or Windows (also with WSL). On Windows, the tests cover F5
+  (the debug type `ts`); the editor plugin and `ts` in a terminal are tested
+  on Linux and macOS.
 
 The tests run with TypeScript 6.0.3, the TypeScript of VS Code 1.125 and
 later. TypeScript 7 has no `tsserver.js` and loads no plugins: for a

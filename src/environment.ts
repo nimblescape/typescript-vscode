@@ -112,7 +112,8 @@ export function tsBatchScript(script: string): string {
     'where node >nul 2>nul',
     'if errorlevel 1 goto nonode',
     `node "${script.replaceAll('%', '%%')}" %*`,
-    'exit /b',
+    // cmd /c, as PowerShell and js-debug start a batch file, gives 0 for an exit /b without a code.
+    'exit /b %errorlevel%',
     ':nonode',
     `echo ${NO_NODE_MESSAGE} 1>&2`,
     'exit /b 9009',

@@ -198,7 +198,7 @@ describe('the ts of a debug session', () => {
     expect(tsBatchScript('C:\\Users\\a&b 100%\\ts.js')).toBe(
       '@echo off\r\nrem ts of the extension nimblescape TypeScript\r\n' +
         'where node >nul 2>nul\r\nif errorlevel 1 goto nonode\r\n' +
-        'node "C:\\Users\\a&b 100%%\\ts.js" %*\r\nexit /b\r\n' +
+        'node "C:\\Users\\a&b 100%%\\ts.js" %*\r\nexit /b %errorlevel%\r\n' +
         `:nonode\r\necho ${NO_NODE_MESSAGE} 1>&2\r\nexit /b 9009\r\n`,
     );
   });

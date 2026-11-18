@@ -11,6 +11,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { realPath } from '../../src/cli/run.ts';
 
 const folders: string[] = [];
 afterEach(() => {
@@ -19,6 +20,8 @@ afterEach(() => {
 
 beforeEach(() => {
   vi.resetModules();
+  // A test that mocks node:fs mocks it only for itself.
+  vi.doUnmock('node:fs');
   vi.doMock('vscode', () => ({}));
 });
 
@@ -28,7 +31,7 @@ const ts = { command: '/usr/local/bin/ts', packageFolder: '/usr/local/lib/node_m
 describe('the configuration of js-debug', () => {
   it('runs the program with ts in the integrated terminal, with the source maps of the output of ts', async () => {
     const { MARKER, nodeConfiguration } = await import('../../src/debugType.ts');
-    const config = nodeConfiguration({ type: 'ts', request: 'launch', name: 'Run', program: '${file}' }, workspace as never, ts, { A: '1' });
+    const config = nodeConfiguration({ type: 'ts', request: 'launch', name: 'Run', program: '${file}' }, workspace as never, ts, { A: '1' }, 'linux');
     expect(config).toMatchObject({
       type: 'node',
       request: 'launch',
@@ -53,7 +56,7 @@ describe('the configuration of js-debug', () => {
 
   it('skips the files of ts also by their real path when the folder of ts lies behind a symbolic link', async () => {
     const { nodeConfiguration } = await import('../../src/debugType.ts');
-    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ts-link-')));
+    const root = realPath(fs.mkdtempSync(path.join(os.tmpdir(), 'ts-link-')));
     folders.push(root);
     fs.mkdirSync(path.join(root, 'extension', 'cli'), { recursive: true });
     fs.symlinkSync(path.join(root, 'extension'), path.join(root, 'link'));
@@ -62,6 +65,13 @@ describe('the configuration of js-debug', () => {
     expect(config.skipFiles).toEqual(
       expect.arrayContaining([`${path.join(root, 'link', 'cli')}/**`, `${path.join(root, 'extension', 'cli')}/**`]),
     );
+  });
+
+  it('ends ts and the program at once on Windows, which has no SIGTERM', async () => {
+    const { nodeConfiguration } = await import('../../src/debugType.ts');
+    const run = { type: 'ts', request: 'launch', name: 'Run', program: '${file}' };
+    expect(nodeConfiguration(run, workspace as never, ts, {}, 'win32').killBehavior).toBe('forceful');
+    expect(nodeConfiguration(run, workspace as never, ts, {}, 'darwin').killBehavior).toBe('polite');
   });
 
   it('gives ts the program before the arguments of the program', async () => {
@@ -79,7 +89,7 @@ describe('the configuration of js-debug', () => {
 
   it('adds the real folder of the runs to outFiles and resolveSourceMapLocations, after the variables of VS Code', async () => {
     const { MARKER, RunFolderProvider } = await import('../../src/debugType.ts');
-    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ts-runs-')));
+    const root = realPath(fs.mkdtempSync(path.join(os.tmpdir(), 'ts-runs-')));
     folders.push(root);
     fs.mkdirSync(path.join(root, 'store'));
     fs.mkdirSync(path.join(root, 'course'));
@@ -123,9 +133,10 @@ describe('the configuration of js-debug', () => {
 });
 
 describe('the ts of a debug session', () => {
-  it('is a global ts of npm on the PATH, and not another command named ts', async () => {
+  // The search splits the PATH at ":", which a folder of Windows holds after its drive letter.
+  it.skipIf(process.platform === 'win32')('is a global ts of npm on the PATH, and not another command named ts', async () => {
     const { globalTs } = await import('../../src/environment.ts');
-    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ts-global-')));
+    const root = realPath(fs.mkdtempSync(path.join(os.tmpdir(), 'ts-global-')));
     folders.push(root);
     const script = path.join(root, 'lib', 'node_modules', '@nimblescape', 'typescript', 'dist', 'ts.js');
     fs.mkdirSync(path.dirname(script), { recursive: true });
@@ -139,17 +150,130 @@ describe('the ts of a debug session', () => {
     expect(globalTs({ PATH: path.join(root, 'other') })).toBeUndefined();
   });
 
-  it('is the script of the extension, which names the folder of the extension in quotes that the shell keeps', async () => {
-    const { tsShellScript } = await import('../../src/environment.ts');
-    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ts-script-')));
+  it('is the batch file ts.cmd of a global ts of npm on the PATH of Windows, with the package in node_modules/', async () => {
+    const { globalTs } = await import('../../src/environment.ts');
+    const root = realPath(fs.mkdtempSync(path.join(os.tmpdir(), 'ts-global-windows-')));
     folders.push(root);
-    // A folder name with the characters that a shell reads as syntax inside double quotes.
-    const script = path.join(root, `it's "$HOME" \`$(id)\``, 'ts.js');
-    fs.mkdirSync(path.dirname(script));
-    fs.writeFileSync(script, 'console.log(JSON.stringify(process.argv.slice(1)));\n');
-    const shell = path.join(root, 'ts');
-    fs.writeFileSync(shell, tsShellScript(script), { mode: 0o755 });
-    const result = spawnSync(shell, ['main.ts', 'a b'], { encoding: 'utf8' });
-    expect(JSON.parse(result.stdout)).toEqual([script, 'main.ts', 'a b']);
+    // npm on Windows: the folder of the prefix holds ts, ts.cmd and ts.ps1, and the packages lie in its node_modules/.
+    const npm = path.join(root, 'npm');
+    const packageFolder = path.join(npm, 'node_modules', '@nimblescape', 'typescript');
+    fs.mkdirSync(path.join(packageFolder, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(packageFolder, 'dist', 'ts.js'), '');
+    for (const name of ['ts', 'ts.cmd', 'ts.ps1']) fs.writeFileSync(path.join(npm, name), '');
+    // Another command ts.cmd, without the package next to it.
+    fs.mkdirSync(path.join(root, 'other'));
+    fs.writeFileSync(path.join(root, 'other', 'ts.cmd'), '');
+    const PATH = [path.join(root, 'none'), path.join(root, 'other'), npm].join(';');
+    expect(globalTs({ PATH }, 'win32')).toEqual({ command: path.join(npm, 'ts.cmd'), packageFolder });
+    expect(globalTs({ PATH: path.join(root, 'other') }, 'win32')).toBeUndefined();
+  });
+
+  it('is on Windows the batch file of the extension next to its shell script', async () => {
+    const written = new Map<string, string>();
+    vi.doMock('node:fs', async (original) => {
+      const real = await original<typeof import('node:fs')>();
+      const mocked = {
+        ...real,
+        mkdirSync: () => undefined,
+        chmodSync: () => undefined,
+        readFileSync: () => {
+          throw new Error('missing');
+        },
+        writeFileSync: (file: string, text: string) => void written.set(file, text),
+      };
+      return { ...mocked, default: mocked };
+    });
+    const { writeTsScript } = await import('../../src/environment.ts');
+    const context = { extensionPath: '/x/extension', globalStorageUri: { fsPath: '/x/storage' } } as never;
+    expect(writeTsScript(context, 'win32')).toBe(path.join('/x/storage', 'bin', 'ts.cmd'));
+    expect([...written.keys()]).toEqual([path.join('/x/storage', 'bin', 'ts'), path.join('/x/storage', 'bin', 'ts.cmd')]);
+    expect(written.get(path.join('/x/storage', 'bin', 'ts.cmd'))).toContain(`node "${path.join('/x/extension', 'cli', 'dist', 'ts.js')}" %*`);
+    written.clear();
+    expect(writeTsScript(context, 'linux')).toBe(path.join('/x/storage', 'bin', 'ts'));
+    expect([...written.keys()]).toEqual([path.join('/x/storage', 'bin', 'ts')]);
+  });
+
+  it('names the script of the extension in the batch file in double quotes, with %% for each %', async () => {
+    const { tsBatchScript, NO_NODE_MESSAGE } = await import('../../src/environment.ts');
+    expect(tsBatchScript('C:\\Users\\a&b 100%\\ts.js')).toBe(
+      '@echo off\r\nrem ts of the extension nimblescape TypeScript\r\n' +
+        'where node >nul 2>nul\r\nif errorlevel 1 goto nonode\r\n' +
+        'node "C:\\Users\\a&b 100%%\\ts.js" %*\r\nexit /b %errorlevel%\r\n' +
+        `:nonode\r\necho ${NO_NODE_MESSAGE} 1>&2\r\nexit /b 9009\r\n`,
+    );
+  });
+
+  it('prints a message without a character that cmd or sh reads as syntax when node is not on the PATH', async () => {
+    const { NO_NODE_MESSAGE, NODE_HELP } = await import('../../src/environment.ts');
+    expect(NO_NODE_MESSAGE).toContain(NODE_HELP);
+    expect(NO_NODE_MESSAGE).not.toMatch(/[&|<>^()%'"`$\\]/);
+  });
+
+  /** The variables of this process without PATH, whose name is Path on Windows, and `PATH` as the PATH. */
+  const withPath = (PATH: string): NodeJS.ProcessEnv => {
+    const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toUpperCase() !== 'PATH'));
+    return { ...environment, [process.platform === 'win32' ? 'Path' : 'PATH']: PATH };
+  };
+
+  /** A folder with ts.js, which prints its arguments and exits with 3. */
+  function tsFolder(prefix: string, name = 'ts.js'): { root: string; script: string } {
+    const root = realPath(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+    folders.push(root);
+    const script = path.join(root, name);
+    fs.mkdirSync(path.dirname(script), { recursive: true });
+    fs.writeFileSync(script, 'console.log(JSON.stringify(process.argv.slice(1))); process.exitCode = 3;\n');
+    return { root, script };
+  }
+
+  // cmd reads the batch file; only Windows has it.
+  describe.runIf(process.platform === 'win32')('the batch file', () => {
+    /** Runs the batch file through cmd (shell), which takes the command line as it is. */
+    const run = (batch: string, PATH?: string) =>
+      spawnSync(`"${batch}" main.ts "a b"`, { encoding: 'utf8', shell: true, env: PATH === undefined ? process.env : withPath(PATH) });
+
+    it('runs the script of the extension, also from a folder with spaces and &', async () => {
+      const { tsBatchScript } = await import('../../src/environment.ts');
+      const { root, script } = tsFolder('ts-batch-', path.join('a & b 100%', 'ts.js'));
+      const batch = path.join(root, 'ts.cmd');
+      fs.writeFileSync(batch, tsBatchScript(script));
+      const result = run(batch);
+      expect(JSON.parse(result.stdout)).toEqual([script, 'main.ts', 'a b']);
+      expect(result.status).toBe(3);
+    });
+
+    it('says where the README helps when the PATH has no node, as after fnm without fnm env', async () => {
+      const { tsBatchScript, NO_NODE_MESSAGE } = await import('../../src/environment.ts');
+      const { root, script } = tsFolder('ts-batch-');
+      const batch = path.join(root, 'ts.cmd');
+      fs.writeFileSync(batch, tsBatchScript(script));
+      const result = run(batch, path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32'));
+      expect(result.stderr.trim()).toBe(NO_NODE_MESSAGE);
+      expect(result.status).toBe(9009);
+    });
+  });
+
+  // The shell script needs a shell; Windows runs the batch file instead.
+  describe.skipIf(process.platform === 'win32')('the shell script', () => {
+    it('names the folder of the extension in quotes that the shell keeps', async () => {
+      const { tsShellScript } = await import('../../src/environment.ts');
+      // A folder name with the characters that a shell reads as syntax inside double quotes.
+      const { root, script } = tsFolder('ts-script-', path.join(`it's "$HOME" \`$(id)\``, 'ts.js'));
+      const shell = path.join(root, 'ts');
+      fs.writeFileSync(shell, tsShellScript(script), { mode: 0o755 });
+      const result = spawnSync(shell, ['main.ts', 'a b'], { encoding: 'utf8' });
+      expect(JSON.parse(result.stdout)).toEqual([script, 'main.ts', 'a b']);
+      expect(result.status).toBe(3);
+    });
+
+    it('says where the README helps when the PATH has no node', async () => {
+      const { tsShellScript, NO_NODE_MESSAGE } = await import('../../src/environment.ts');
+      const { root, script } = tsFolder('ts-script-');
+      const shell = path.join(root, 'ts');
+      fs.writeFileSync(shell, tsShellScript(script), { mode: 0o755 });
+      // The kernel starts /bin/sh by the path in the first line; a folder without node as PATH has no node.
+      const result = spawnSync(shell, ['main.ts'], { encoding: 'utf8', env: withPath(root) });
+      expect(result.stderr.trim()).toBe(NO_NODE_MESSAGE);
+      expect(result.status).toBe(127);
+    });
   });
 });

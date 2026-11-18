@@ -34,12 +34,11 @@
 // package.json describes the attributes of the type (contributes.debuggers), so VS Code suggests and checks them in
 // launch.json. Without launch.json, F5 offers "Run TypeScript file" for the file of the active editor.
 
-import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { projectOfFile } from './cli/compile.ts';
-import { DEBUG_VARIABLE, realCacheFolder, STOP_ON_ENTRY } from './cli/run.ts';
+import { DEBUG_VARIABLE, realCacheFolder, realPath, STOP_ON_ENTRY } from './cli/run.ts';
 import { tsCommand, tsVariables } from './environment.ts';
 
 export const DEBUG_TYPE = 'ts';
@@ -75,11 +74,12 @@ export function programFolder(program: string, folder: vscode.WorkspaceFolder | 
 
 /**
  * A folder and its real path, if that is another one. Node.js names the files of a program by their real paths, so
- * a pattern of js-debug for a folder behind a symbolic link must also name the real path.
+ * a pattern of js-debug for a folder behind a symbolic link must also name the real path; on Windows, the real path
+ * also has the long names of the folders of 8.3 short names (realPath of cli/run.ts), as ts names its folders.
  */
 function withRealPath(folder: string): string[] {
   try {
-    const real = fs.realpathSync(folder);
+    const real = realPath(folder);
     return real === folder ? [folder] : [folder, real];
   } catch {
     // The folder does not exist (yet).
@@ -101,6 +101,7 @@ export function nodeConfiguration(
   folder: vscode.WorkspaceFolder | undefined,
   ts: { command: string; packageFolder: string },
   variables: Record<string, string>,
+  platform = process.platform,
 ): vscode.DebugConfiguration {
   const { program = '${file}', args = [], stopOnEntry, env, ...attributes } = config;
   return {
@@ -122,8 +123,10 @@ export function nodeConfiguration(
       // The extension can lie behind a symbolic link, and Node.js names the files of ts by their real paths.
       ...withRealPath(ts.packageFolder).map((folder) => `${folder}/**`),
     ],
-    // SIGTERM ends the program, and ts then deletes the folder of the run; SIGKILL would leave it.
-    killBehavior: 'polite',
+    // SIGTERM ends the program, and ts then deletes the folder of the run; SIGKILL would leave it. Windows has no
+    // SIGTERM: js-debug asks with taskkill without /F, which ends no process without a window, so ts and the program
+    // would go on. There, js-debug ends them at once, and the next start of ts deletes the folder of the run.
+    killBehavior: platform === 'win32' ? 'forceful' : 'polite',
     ...attributes,
     type: 'node',
     request: 'launch',

@@ -3,17 +3,45 @@
 Each section lists the changes of one released version. The release workflow
 takes the section of a version as the notes of its GitHub release.
 
-## 0.3.2
+## 0.3.4
 
 **`ts` finds the TypeScript of VS Code also after the change of VS Code to
 pnpm.** The default version of the install question is the TypeScript of
-the newest stable VS Code. Up to 0.3.1, `ts` read it only from the file
+the newest stable VS Code. Up to 0.3.3, `ts` read it only from the file
 `extensions/package-lock.json` of VS Code on GitHub. VS Code now builds
 its extensions with pnpm, and its newer versions have the file
 `extensions/pnpm-lock.yaml` instead. With such a version, `ts` would have
 offered the TypeScript that VS Code shipped when `ts` was built, and named
 it "offline". Now `ts` reads `pnpm-lock.yaml` and, for the older versions
 of VS Code, `package-lock.json`.
+
+## 0.3.3
+
+**A clear message when Node.js is missing.** When `node` was not on the
+`PATH`, `ts` and F5 stopped without a clear reason: cmd printed only
+"'node' is not recognized", and the program did not start. This happens,
+for example, when the version manager fnm puts Node.js only on the `PATH`
+of a shell that runs `fnm env`, and VS Code was started from the Start
+menu. Now `ts` prints "ts: Node.js was not found on the PATH" with a link
+to the README, which explains how to put Node.js on the `PATH` of VS Code.
+
+## 0.3.2
+
+**F5 works directly on Windows.** Up to 0.3.1, the debug type `ts` started
+`ts` with a shell script, which cmd and PowerShell cannot run. On Windows,
+no program started, and the debug session waited without a pause, also with
+`stopOnEntry`; the extension nimblescape Mindbug, which starts programs with
+the debug type `ts`, did not pause either. Now the extension also writes the
+batch file `ts.cmd` next to the shell script and starts it on Windows, and
+it finds a global `ts` of npm by its `ts.cmd`. The terminals of VS Code on
+Windows get `ts` too: cmd and PowerShell run `ts.cmd`, and Git Bash runs the
+shell script. A new CI job runs the tests of the debug type on Windows.
+
+**Stop and Restart on Windows.** On Windows, Stop and Restart of a debug
+session now end `ts` and the program at once. Windows has no signal
+`SIGTERM`, and the polite request of the debugger ended neither `ts` nor
+the program, so they went on. The next start of `ts` deletes the folder of
+the run that ended so.
 
 ## 0.3.1
 

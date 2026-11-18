@@ -160,10 +160,13 @@ describe('the debug type ts', () => {
     const { root, ended } = await start(config(file('loose', 'main.ts'), { args: ['Bello'] }));
     await ended;
     assert.match(output(), /Bello: Woof/);
-    assert.match(output(), new RegExp(`cwd ${fs.realpathSync(file('loose')).replace(/[/\\.]/g, '\\$&')}`));
-    // js-debug turns the configuration of type node into one of type pwa-node, with the command ts.
+    // Windows gives the drive letter of the folder in upper case, VS Code in lower case.
+    const cwd = fs.realpathSync(file('loose')).replace(/[/\\.]/g, '\\$&');
+    assert.match(output(), new RegExp(`cwd ${cwd}`, process.platform === 'win32' ? 'i' : ''));
+    // js-debug turns the configuration of type node into one of type pwa-node, with the command ts: on Windows, the
+    // batch file ts.cmd.
     assert.equal(root.type, 'pwa-node');
-    assert.match(String(root.configuration.runtimeExecutable), /ts$/);
+    assert.match(String(root.configuration.runtimeExecutable), process.platform === 'win32' ? /ts\.cmd$/ : /ts$/);
   });
 
   it('stops at a type error with the message of tsc, and runs nothing', async () => {
@@ -243,7 +246,13 @@ describe('the debug type ts', () => {
     assert.deepEqual([second.reason, fs.realpathSync(second.file), second.line], ['step', fs.realpathSync(file('commonjs', 'sort.ts')), 5]);
     await continueToEnd(second, ended);
     // js-debug ends the first run with SIGTERM (killBehavior "polite"), so ts deletes the folder of that run too.
-    assert.equal(fs.existsSync(file('commonjs', 'node_modules')), false);
+    // Windows has no SIGTERM: js-debug ends the first run at once (killBehavior "forceful"), and the start of the
+    // second run deletes its folder; the folders above it stay, because no run of ts created them.
+    if (process.platform !== 'win32') assert.equal(fs.existsSync(file('commonjs', 'node_modules')), false);
+    else {
+      assert.deepEqual(fs.readdirSync(file('commonjs', 'node_modules', '.cache', 'ts')), []);
+      fs.rmSync(file('commonjs', 'node_modules'), { recursive: true });
+    }
   });
 
   for (const folder of ['loose', 'project', 'linked', 'commonjs']) {

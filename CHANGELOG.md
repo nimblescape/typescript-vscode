@@ -9,11 +9,12 @@ takes the section of a version as the notes of its GitHub release.
 pnpm.** The default version of the install question is the TypeScript of
 the newest stable VS Code. Up to 0.3.3, `ts` read it only from the file
 `extensions/package-lock.json` of VS Code on GitHub. VS Code now builds
-its extensions with pnpm, and its newer versions have the file
-`extensions/pnpm-lock.yaml` instead. With such a version, `ts` would have
-offered the TypeScript that VS Code shipped when `ts` was built, and named
-it "offline". Now `ts` reads `pnpm-lock.yaml` and, for the older versions
-of VS Code, `package-lock.json`.
+its extensions with pnpm: VS Code 1.146 has the file
+`extensions/pnpm-lock.yaml` instead, and the development version of VS
+Code keeps the TypeScript of the extensions in the file `pnpm-lock.yaml` of
+the whole repository. Since VS Code 1.146, `ts` offered the TypeScript that VS Code
+shipped when `ts` was built, and named it "offline". Now `ts` reads the
+three files and takes the newest form that names the TypeScript.
 
 ## 0.3.3
 

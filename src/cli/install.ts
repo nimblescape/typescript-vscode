@@ -2,16 +2,15 @@
 // © 2026 Hannes Stauss (scalarion@nimblescape.com)
 // Licensed under the MIT License. See LICENSE in the repository root for details.
 
-// The global install of TypeScript, when ts finds none (typescript.ts), and `ts install`. The default
-// version is the TypeScript of the newest stable VS Code, so that ts outside VS Code reports the same errors as the
-// editor: ts reads the newest version of VS Code from update.code.visualstudio.com and the TypeScript of that version
-// from the lock file of its extensions on GitHub: extensions/pnpm-lock.yaml, or extensions/package-lock.json in the
-// versions of VS Code before the change from npm to pnpm. Offline, the default is the TypeScript that VS Code
-// shipped when this release of ts was built (BUNDLED_TYPESCRIPT). In a terminal, ts lists every version of npm from
-// TypeScript 6 on, without the nightly builds, newest first, and the user selects one with the arrow keys; the default
-// is selected first. A global TypeScript that is too old for ts (below TypeScript 6) gets the same list, after the
-// question whether to upgrade it, and so does `ts install` outside a project or `ts install --global`; without a
-// terminal, `ts install` installs the default.
+// The global install of TypeScript, when ts finds none (typescript.ts), and `ts install`. The default version is the
+// TypeScript of the newest stable VS Code, so that ts outside VS Code reports the same errors as the editor: ts reads
+// the newest version of VS Code from update.code.visualstudio.com and the TypeScript of that version from the lock file
+// of its extensions on GitHub (vscodeLockTypeScript). Offline, the default is the TypeScript that VS Code shipped when
+// this release of ts was built (BUNDLED_TYPESCRIPT). In a terminal, ts lists every version of npm from TypeScript 6 on,
+// without the nightly builds, newest first, and the user selects one with the arrow keys; the default is selected
+// first. A global TypeScript that is too old for ts (below TypeScript 6) gets the same list, after the question whether
+// to upgrade it, and so does `ts install` outside a project or `ts install --global`; without a terminal, `ts install`
+// installs the default.
 
 import { spawnSync } from 'node:child_process';
 import { askChoice, askYesNo, canAsk } from './ask.ts';
@@ -47,8 +46,8 @@ export function isOfferedVersion(version: unknown): version is string {
 }
 
 /**
- * The TypeScript in the lock file of pnpm (extensions/pnpm-lock.yaml): the version of `typescript` among the
- * dependencies of the importer `.`, the folder extensions/ itself. pnpm writes these lines:
+ * The TypeScript in a lock file of pnpm: the version of `typescript` among the dependencies of the importer `name`, a
+ * folder of the workspace relative to the lock file. pnpm writes these lines (here for the importer `.`):
  *
  *   importers:
  *
@@ -58,9 +57,10 @@ export function isOfferedVersion(version: unknown): version is string {
  *           specifier: ^6.0.3
  *           version: 6.0.3
  *
- * ts reads only the indentation of these lines, without a YAML parser; isOfferedVersion checks the result.
+ * ts reads only the indentation of these lines, without a YAML parser; isOfferedVersion checks the result. A file can
+ * hold several documents (pnpm writes the lock of its own version first); each of them can have importers.
  */
-export function pnpmLockTypeScript(lock: string): string | undefined {
+export function pnpmLockTypeScript(lock: string, name: string): string | undefined {
   let [section, importer, dependency] = ['', '', ''];
   for (const line of lock.split(/\r?\n/)) {
     const text = line.trim();
@@ -70,7 +70,7 @@ export function pnpmLockTypeScript(lock: string): string | undefined {
     else if (indent === 2) [importer, dependency] = [text, ''];
     else if (indent === 4) dependency = '';
     else if (indent === 6) dependency = text;
-    else if (indent === 8 && section === 'importers:' && importer === '.:' && dependency === 'typescript:') {
+    else if (indent === 8 && section === 'importers:' && importer === `${name}:` && dependency === 'typescript:') {
       // A version can carry the versions of its peer dependencies in parentheses, and quotes.
       const version = /^version:\s*['"]?([^'"\s(]+)/.exec(text)?.[1];
       if (version !== undefined) return version;
@@ -84,6 +84,23 @@ export function npmLockTypeScript(lock: unknown): unknown {
   return (lock as { packages?: Record<string, { version?: unknown }> } | null)?.packages?.['node_modules/typescript']?.version;
 }
 
+/**
+ * The TypeScript of the extensions of VS Code at a tag or branch of its repository on GitHub; undefined when no lock
+ * file names one. The lock file of the extensions has three forms, from the newest to the oldest: the importer
+ * `extensions` in pnpm-lock.yaml of the whole repository, the importer `.` in extensions/pnpm-lock.yaml (VS Code 1.146),
+ * and extensions/package-lock.json of npm (VS Code 1.145 and older). ts asks for the three files at the same time and
+ * takes the newest form that names a version.
+ */
+export async function vscodeLockTypeScript(ref: string): Promise<string | undefined> {
+  const files = `https://raw.githubusercontent.com/microsoft/vscode/${ref}`;
+  const found = await Promise.allSettled([
+    fetchText(`${files}/pnpm-lock.yaml`).then((lock) => pnpmLockTypeScript(lock, 'extensions')),
+    fetchText(`${files}/extensions/pnpm-lock.yaml`).then((lock) => pnpmLockTypeScript(lock, '.')),
+    fetchJson(`${files}/extensions/package-lock.json`).then(npmLockTypeScript),
+  ]);
+  return found.map((result) => (result.status === 'fulfilled' ? result.value : undefined)).find(isOfferedVersion);
+}
+
 /** The TypeScript of the newest stable VS Code, and that version of VS Code; undefined offline. */
 export async function vscodeTypeScript(): Promise<{ typescript: string; vscode: string } | undefined> {
   try {
@@ -91,14 +108,7 @@ export async function vscodeTypeScript(): Promise<{ typescript: string; vscode: 
     // The version of VS Code names a tag in the address of the next requests.
     const vscode = Array.isArray(releases) && typeof releases[0] === 'string' && /^\d+\.\d+\.\d+$/.test(releases[0]) ? releases[0] : undefined;
     if (!vscode) return undefined;
-    // A version of VS Code has one of the two lock files: pnpm-lock.yaml since VS Code builds its extensions with
-    // pnpm, package-lock.json before. ts asks for both at the same time and prefers the one of pnpm.
-    const extensions = `https://raw.githubusercontent.com/microsoft/vscode/${vscode}/extensions`;
-    const found = await Promise.allSettled([
-      fetchText(`${extensions}/pnpm-lock.yaml`).then(pnpmLockTypeScript),
-      fetchJson(`${extensions}/package-lock.json`).then(npmLockTypeScript),
-    ]);
-    const typescript = found.map((result) => (result.status === 'fulfilled' ? result.value : undefined)).find(isOfferedVersion);
+    const typescript = await vscodeLockTypeScript(vscode);
     return typescript === undefined ? undefined : { typescript, vscode };
   } catch {
     return undefined;
@@ -169,7 +179,7 @@ export function versionChoices(
 
 /**
  * The default version and the offered versions for the list. The requests of the default (the version of VS Code, then
- * its two lock files at the same time) and the request to npm run at the same time, so a slow network makes the list
+ * its lock files at the same time) and the request to npm run at the same time, so a slow network makes the list
  * wait for two timeouts at most, not for four.
  */
 export async function listVersions(): Promise<{ fallback: { version: string; reason: string }; offered: string[] }> {

@@ -39,6 +39,7 @@ import type * as ts from 'typescript';
 import { findUp, PLUGIN_NAME } from '../defaults.ts';
 import { askYesNo, canAsk } from './ask.ts';
 import { loadTypeScript } from './compile.ts';
+import { runNpm } from './npm.ts';
 import { packageFolder, readManifest, type TypeScriptInstall } from './typescript.ts';
 
 /** The command that installs the types of Node.js, as the comment of tsc --init names it. */
@@ -131,8 +132,8 @@ function ensureNodeTypes(): number {
   console.log('The types of Node.js (@types/node) are not installed.');
   if (!askYesNo(`Run ${command} now?`)) return 0;
   console.log(`> ${command}`);
-  const [npm, ...args] = NODE_TYPES_COMMAND;
-  return spawnSync(npm, args, { stdio: 'inherit' }).status ?? 1;
+  const [, ...args] = NODE_TYPES_COMMAND;
+  return runNpm(args);
 }
 
 /** Writes tsconfig.json into the current folder; returns the exit code for ts. */

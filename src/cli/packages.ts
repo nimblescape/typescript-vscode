@@ -7,10 +7,10 @@
 // package-lock.json, ts runs npm ci (exactly the versions of the lock file), otherwise npm install. Without a
 // terminal, ts prints the command and stops (ask.ts). `ts install` runs the same command without a question.
 
-import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { askYesNo, canAsk } from './ask.ts';
+import { runNpm } from './npm.ts';
 import { dependencies, packageFolder, projectOf } from './typescript.ts';
 
 /** The packages of the project of `folder` that are not installed, and the folder of its package.json. */
@@ -43,8 +43,7 @@ export function ensurePackages(folder: string): boolean {
   console.log(`The packages of this course are not installed (${names}).`);
   if (!askYesNo(`Run ${command} ${where} now?`)) return false;
   console.log(`> ${command}`);
-  const result = spawnSync('npm', installArguments(missing.root), { cwd: missing.root, stdio: 'inherit' });
-  return result.status === 0 && missingPackages(folder) === undefined;
+  return runNpm(installArguments(missing.root), missing.root) === 0 && missingPackages(folder) === undefined;
 }
 
 /**
@@ -57,5 +56,5 @@ export function installProject(folder: string): boolean | undefined {
   if (!project || dependencies(project.manifest, ['dependencies', 'devDependencies']).length === 0) return undefined;
   const relative = path.relative(process.cwd(), project.root);
   console.log(`> npm ${installArguments(project.root).join(' ')}${relative === '' ? '' : ` (in ${relative})`}`);
-  return spawnSync('npm', installArguments(project.root), { cwd: project.root, stdio: 'inherit' }).status === 0;
+  return runNpm(installArguments(project.root), project.root) === 0;
 }

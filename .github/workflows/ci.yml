@@ -179,9 +179,9 @@ jobs:
       - name: Install the locked package of the command ts without install scripts
         run: npm ci --ignore-scripts --prefix cli
 
-      # The other unit tests name POSIX paths, a shell or npm without .cmd, and do not run on Windows yet.
-      - name: Run the unit tests of the debug type ts
-        run: npm test -- test/unit/debugType.test.ts
+      # The other unit tests name POSIX paths or a shell, and do not run on Windows yet.
+      - name: Run the unit tests of the debug type ts and of the start of npm
+        run: npm test -- test/unit/debugType.test.ts test/unit/npm.test.ts
 
       # Only the run "loose" of .vscode-test.mjs debugs programs; the other runs test the editor with the examples.
       - name: Run the tests of the debug type ts in VS Code

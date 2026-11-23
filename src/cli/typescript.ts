@@ -13,10 +13,10 @@
 // TypeScript 6 or newer is required: ts needs rewriteRelativeImportExtensions, and 5.7 to 5.9 are not supported.
 // When no TypeScript is found, ts offers to install one globally (install.ts).
 
-import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { findUp } from '../defaults.ts';
+import { spawnNpm } from './npm.ts';
 
 /** The lowest major version of TypeScript that ts supports. */
 export const MINIMUM_MAJOR = 6;
@@ -94,8 +94,8 @@ function globalFolders(): string[] {
 
 /** The global node_modules folder of npm (npm root --global), which can take some 100 ms. */
 function npmGlobalFolder(): string | undefined {
-  const result = spawnSync('npm', ['root', '--global'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-  const folder = result.status === 0 ? result.stdout.trim() : '';
+  const result = spawnNpm(['root', '--global'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  const folder = result.status === 0 ? String(result.stdout).trim() : '';
   return folder || undefined;
 }
 
